@@ -1,0 +1,88 @@
+# Arquitetura de Alto Nível
+
+Este documento descreve o fluxo atual do Go Webhook Processor.
+
+## Fluxo principal
+
+```mermaid
+flowchart LR
+    client[Cliente externo / sistema parceiro]
+    api[Servidor HTTP Go]
+    handler[POST /events]
+    validation[Validação do JSON]
+    queue[Fila interna<br/>chan Event]
+    workers[Workers concorrentes<br/>goroutines]
+    processor[Processamento do evento]
+    health[GET /health]
+
+    client -->|POST /events| api
+    api --> handler
+    handler --> validation
+    validation -->|evento inválido| badRequest[400 Bad Request]
+    validation -->|evento válido| queue
+    queue -->|evento enfileirado| accepted[202 Accepted]
+    queue --> workers
+    workers --> processor
+
+    client -->|GET /health| api
+    api --> health
+    health --> healthResponse[status, queueLength, queueCapacity]
+```
+
+## Fluxo de configuração
+
+```mermaid
+flowchart TD
+    env[Variáveis de ambiente]
+    defaults[Valores padrão]
+    config[LoadConfig]
+    app[NewApp]
+    server[Servidor HTTP]
+    queue[Fila interna]
+    workers[Workers]
+
+    env --> config
+    defaults --> config
+    config --> app
+    config --> server
+    config --> workers
+    app --> queue
+```
+
+## Fluxo de encerramento gracioso
+
+```mermaid
+sequenceDiagram
+    participant OS as Sistema operacional
+    participant Main as main.go
+    participant HTTP as Servidor HTTP
+    participant Queue as Fila interna
+    participant Workers as Workers
+
+    OS->>Main: SIGINT / SIGTERM
+    Main->>HTTP: Shutdown com timeout
+    HTTP-->>Main: Para de aceitar novas requisições
+    Main->>Queue: close(eventQueue)
+    Queue-->>Workers: Não há novos eventos
+    Workers-->>Workers: Finalizam eventos em andamento
+    Workers-->>Main: WaitGroup concluído
+    Main-->>OS: Processo encerrado com segurança
+```
+
+## Explicação rápida
+
+1. Um sistema externo envia `POST /events`.
+2. O handler valida o JSON e os campos obrigatórios.
+3. Se o evento for válido, ele entra na fila interna `chan Event`.
+4. A API responde `202 Accepted` rapidamente.
+5. Os workers, rodando em goroutines, consomem a fila e processam os eventos em paralelo.
+6. O endpoint `GET /health` mostra o estado básico da aplicação e da fila.
+7. Quando a aplicação recebe `Ctrl+C` ou `SIGTERM`, ela executa shutdown gracioso.
+
+## Componentes atuais
+
+```text
+Cliente externo -> HTTP server -> handler -> validação -> fila interna -> workers -> processamento
+```
+
+A fila ainda é em memória. Em uma evolução futura, ela pode ser substituída ou complementada por uma fila externa, como RabbitMQ, Kafka, SQS ou Redis Streams.

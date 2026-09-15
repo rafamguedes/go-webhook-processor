@@ -28,6 +28,25 @@ Cliente externo
           -> workers processam eventos em background
 ```
 
+
+## Diagrama de alto nível
+
+```mermaid
+flowchart LR
+    client[Cliente externo] -->|POST /events| api[Servidor HTTP Go]
+    api --> handler[Handler de eventos]
+    handler --> validation[Validação do JSON]
+    validation -->|inválido| badRequest[400 Bad Request]
+    validation -->|válido| queue[Fila interna chan Event]
+    queue --> accepted[202 Accepted]
+    queue --> workers[Workers em goroutines]
+    workers --> processor[Processamento em background]
+
+    client -->|GET /health| health[Health check]
+    health --> status[Status e métricas da fila]
+```
+
+Veja também a documentação detalhada em [`docs/architecture.md`](docs/architecture.md).
 ## Endpoints
 
 ### GET /health
@@ -243,3 +262,5 @@ Antes de uso real em produção, os próximos passos recomendados são:
 - adicionar métricas
 - adicionar retry com backoff
 - adicionar Dockerfile
+
+
