@@ -1,29 +1,29 @@
 # Go Webhook Processor
 
-Servico HTTP em Go para recebimento e processamento assincrono de eventos via webhook.
+Serviço HTTP em Go para recebimento e processamento assíncrono de eventos via webhook.
 
-A aplicacao foi desenhada para um cenario comum de backend: receber eventos de sistemas externos, validar o payload, responder rapidamente ao cliente e processar o trabalho em segundo plano usando uma fila interna com workers concorrentes.
+A aplicação foi desenhada para um cenário comum de backend: receber eventos de sistemas externos, validar o payload, responder rapidamente ao cliente e processar o trabalho em segundo plano usando uma fila interna com workers concorrentes.
 
 ## Objetivo
 
-Este servico resolve o problema de nao bloquear requisicoes HTTP enquanto uma tarefa potencialmente demorada e executada. O endpoint `POST /events` apenas valida e enfileira o evento. O processamento ocorre de forma assincrona por workers em goroutines.
+Este serviço resolve o problema de não bloquear requisições HTTP enquanto uma tarefa potencialmente demorada é executada. O endpoint `POST /events` apenas valida e enfileira o evento. O processamento ocorre de forma assíncrona por workers em goroutines.
 
-Esse padrao e util para:
+Esse padrão é útil para:
 
 - webhooks de pagamento
-- integracoes com ERPs e CRMs
+- integrações com ERPs e CRMs
 - processamento de pedidos
-- envio de notificacoes
+- envio de notificações
 - tarefas internas baseadas em eventos
-- chamadas para APIs externas com maior latencia
+- chamadas para APIs externas com maior latência
 
 ## Fluxo
 
 ```text
 Cliente externo
   -> POST /events
-    -> validacao do JSON
-      -> envio para fila interna
+    -> validação do JSON
+      -> envio para a fila interna
         -> resposta HTTP 202 Accepted
           -> workers processam eventos em background
 ```
@@ -32,7 +32,7 @@ Cliente externo
 
 ### GET /health
 
-Retorna o status da aplicacao e informacoes basicas da fila interna.
+Retorna o status da aplicação e informações básicas da fila interna.
 
 Exemplo de resposta:
 
@@ -48,7 +48,7 @@ Exemplo de resposta:
 
 ### POST /events
 
-Recebe um evento para processamento assincrono.
+Recebe um evento para processamento assíncrono.
 
 Payload esperado:
 
@@ -71,40 +71,40 @@ Resposta de sucesso:
 }
 ```
 
-Possiveis respostas:
+Possíveis respostas:
 
 ```text
 202 Accepted            evento validado e enfileirado
-400 Bad Request         JSON invalido ou campos obrigatorios ausentes
+400 Bad Request         JSON inválido ou campos obrigatórios ausentes
 503 Service Unavailable fila interna cheia
 ```
 
 ## Arquitetura
 
 ```text
-main.go       bootstrap da aplicacao e configuracao do servidor HTTP
-app.go        estado da aplicacao, fila interna e registro das rotas
-models.go     contratos de entrada e saida usados pela API
-handlers.go   handlers HTTP, validacao e respostas JSON
-worker.go     workers responsaveis pelo processamento assincrono
+main.go       bootstrap da aplicação e configuração do servidor HTTP
+app.go        estado da aplicação, fila interna e registro das rotas
+models.go     contratos de entrada e saída usados pela API
+handlers.go   handlers HTTP, validação e respostas JSON
+worker.go     workers responsáveis pelo processamento assíncrono
 main_test.go  testes automatizados dos handlers
 ```
 
-## Concorrencia
+## Concorrência
 
-A aplicacao usa uma fila interna baseada em `chan Event`:
+A aplicação usa uma fila interna baseada em `chan Event`:
 
 ```go
 eventQueue chan Event
 ```
 
-Os workers sao iniciados como goroutines:
+Os workers são iniciados como goroutines:
 
 ```go
 go worker(workerID, eventQueue)
 ```
 
-Com a configuracao atual, ate 3 eventos podem ser processados em paralelo:
+Com a configuração atual, até 3 eventos podem ser processados em paralelo:
 
 ```go
 const workerCount = 3
@@ -120,19 +120,19 @@ const queueSize = 100
 
 - Go 1.27+
 
-## Execucao local
+## Execução local
 
 ```powershell
 go run .
 ```
 
-Se o Go ainda nao estiver no PATH da sessao atual:
+Se o Go ainda não estiver no PATH da sessão atual:
 
 ```powershell
 & "C:\Program Files\Go\bin\go.exe" run .
 ```
 
-A aplicacao sobe em:
+A aplicação sobe em:
 
 ```text
 http://localhost:8080
@@ -144,7 +144,7 @@ http://localhost:8080
 go test ./...
 ```
 
-Se o Go ainda nao estiver no PATH da sessao atual:
+Se o Go ainda não estiver no PATH da sessão atual:
 
 ```powershell
 & "C:\Program Files\Go\bin\go.exe" test ./...
@@ -156,7 +156,7 @@ Se o Go ainda nao estiver no PATH da sessao atual:
 go build .
 ```
 
-O comando gera um binario executavel do servico.
+O comando gera um binário executável do serviço.
 
 ## Testes manuais
 
@@ -176,11 +176,11 @@ Invoke-RestMethod `
   -Body '{"id":"evt-001","type":"payment.created","payload":{"amount":100}}'
 ```
 
-Enviar multiplos eventos ajuda a observar os workers processando em paralelo pelos logs da aplicacao.
+Enviar múltiplos eventos ajuda a observar os workers processando em paralelo pelos logs da aplicação.
 
 ## Observabilidade atual
 
-A aplicacao registra logs no console para os principais eventos operacionais:
+A aplicação registra logs no console para os principais eventos operacionais:
 
 ```text
 event queued
@@ -188,19 +188,18 @@ worker processing event
 worker finished event
 ```
 
-O endpoint `/health` tambem expoe o tamanho atual da fila por meio dos campos `queueLength` e `queueCapacity`.
+O endpoint `/health` também expõe o tamanho atual da fila por meio dos campos `queueLength` e `queueCapacity`.
 
-## Limitacoes atuais
+## Limitações atuais
 
-Esta versao ainda usa fila em memoria. Isso significa que eventos pendentes sao perdidos se o processo for encerrado antes do processamento.
+Esta versão ainda usa fila em memória. Isso significa que eventos pendentes são perdidos se o processo for encerrado antes do processamento.
 
-Antes de uso real em producao, os proximos passos recomendados sao:
+Antes de uso real em produção, os próximos passos recomendados são:
 
 - persistir eventos em banco ou fila externa
 - adicionar shutdown gracioso
 - adicionar logs estruturados
-- adicionar metricas
+- adicionar métricas
 - adicionar retry com backoff
-- adicionar configuracao por variaveis de ambiente
+- adicionar configuração por variáveis de ambiente
 - adicionar Dockerfile
-
