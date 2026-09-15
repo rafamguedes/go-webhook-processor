@@ -9,38 +9,41 @@ import (
 
 type eventProcessor func(workerID int, event Event) error
 
-func startWorkers(count int, eventQueue <-chan Event, workers *sync.WaitGroup, config Config) {
+func startWorkers(count int, eventQueue <-chan Event, workers *sync.WaitGroup, config Config, metrics *Metrics) {
 	for workerID := 1; workerID <= count; workerID++ {
 		workers.Add(1)
-		go worker(workerID, eventQueue, workers, config)
+		go worker(workerID, eventQueue, workers, config, metrics)
 	}
 }
 
-func worker(workerID int, eventQueue <-chan Event, workers *sync.WaitGroup, config Config) {
+func worker(workerID int, eventQueue <-chan Event, workers *sync.WaitGroup, config Config, metrics *Metrics) {
 	defer workers.Done()
 
 	for event := range eventQueue {
-		processEventWithRetry(workerID, event, config, processEvent, time.Sleep)
+		processEventWithRetry(workerID, event, config, processEvent, time.Sleep, metrics)
 	}
 
 	slog.Info("worker stopped", "worker_id", workerID)
 }
 
-func processEventWithRetry(workerID int, event Event, config Config, processor eventProcessor, sleep func(time.Duration)) bool {
+func processEventWithRetry(workerID int, event Event, config Config, processor eventProcessor, sleep func(time.Duration), metrics *Metrics) bool {
 	maxAttempts := config.MaxRetries + 1
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		err := processor(workerID, event)
 		if err == nil {
+			metrics.IncEventsProcessed()
 			slog.Info("event processing succeeded", "worker_id", workerID, "event_id", event.ID, "event_type", event.Type, "attempt", attempt)
 			return true
 		}
 
 		if attempt == maxAttempts {
+			metrics.IncEventsFailedPermanent()
 			slog.Error("event processing failed permanently", "worker_id", workerID, "event_id", event.ID, "event_type", event.Type, "attempt", attempt, "max_attempts", maxAttempts, "error", err)
 			return false
 		}
 
+		metrics.IncEventRetries()
 		backoff := config.RetryBackoff(attempt)
 		slog.Warn("event processing failed; retrying", "worker_id", workerID, "event_id", event.ID, "event_type", event.Type, "attempt", attempt, "max_attempts", maxAttempts, "backoff", backoff.String(), "error", err)
 		sleep(backoff)

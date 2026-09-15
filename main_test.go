@@ -141,6 +141,42 @@ func TestHealthHandler(t *testing.T) {
 	}
 }
 
+func TestMetricsHandler(t *testing.T) {
+	app := newTestApp()
+	app.metrics.IncEventsQueued()
+	app.metrics.IncEventsProcessed()
+	app.metrics.IncEventRetries()
+
+	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	response := httptest.NewRecorder()
+
+	app.metricsHandler(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, response.Code)
+	}
+
+	var body MetricsResponse
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response body: %v", err)
+	}
+
+	if body.EventsQueued != 1 {
+		t.Fatalf("expected 1 queued event, got %d", body.EventsQueued)
+	}
+
+	if body.EventsProcessed != 1 {
+		t.Fatalf("expected 1 processed event, got %d", body.EventsProcessed)
+	}
+
+	if body.EventRetries != 1 {
+		t.Fatalf("expected 1 retry, got %d", body.EventRetries)
+	}
+
+	if body.QueueCapacity != app.config.QueueSize {
+		t.Fatalf("expected queue capacity %d, got %d", app.config.QueueSize, body.QueueCapacity)
+	}
+}
 func TestCreateEventHandlerQueuesValidEvent(t *testing.T) {
 	app := newTestApp()
 

@@ -10,6 +10,7 @@ func TestProcessEventWithRetrySucceedsAfterFailure(t *testing.T) {
 	config := testConfig()
 	config.MaxRetries = 2
 	config.RetryBackoffSeconds = 1
+	metrics := NewMetrics()
 
 	attempts := 0
 	sleeps := 0
@@ -25,7 +26,7 @@ func TestProcessEventWithRetrySucceedsAfterFailure(t *testing.T) {
 		if duration != time.Second {
 			t.Fatalf("expected first backoff to be 1s, got %s", duration)
 		}
-	})
+	}, metrics)
 
 	if !succeeded {
 		t.Fatal("expected event processing to succeed")
@@ -38,12 +39,22 @@ func TestProcessEventWithRetrySucceedsAfterFailure(t *testing.T) {
 	if sleeps != 1 {
 		t.Fatalf("expected 1 sleep, got %d", sleeps)
 	}
+
+	snapshot := metrics.Snapshot(0, 100)
+	if snapshot.EventRetries != 1 {
+		t.Fatalf("expected 1 retry, got %d", snapshot.EventRetries)
+	}
+
+	if snapshot.EventsProcessed != 1 {
+		t.Fatalf("expected 1 processed event, got %d", snapshot.EventsProcessed)
+	}
 }
 
 func TestProcessEventWithRetryFailsPermanently(t *testing.T) {
 	config := testConfig()
 	config.MaxRetries = 2
 	config.RetryBackoffSeconds = 1
+	metrics := NewMetrics()
 
 	attempts := 0
 	sleeps := 0
@@ -53,7 +64,7 @@ func TestProcessEventWithRetryFailsPermanently(t *testing.T) {
 		return fmt.Errorf("persistent failure")
 	}, func(duration time.Duration) {
 		sleeps++
-	})
+	}, metrics)
 
 	if succeeded {
 		t.Fatal("expected event processing to fail")
@@ -65,6 +76,15 @@ func TestProcessEventWithRetryFailsPermanently(t *testing.T) {
 
 	if sleeps != 2 {
 		t.Fatalf("expected 2 sleeps, got %d", sleeps)
+	}
+
+	snapshot := metrics.Snapshot(0, 100)
+	if snapshot.EventRetries != 2 {
+		t.Fatalf("expected 2 retries, got %d", snapshot.EventRetries)
+	}
+
+	if snapshot.EventsFailedPermanent != 1 {
+		t.Fatalf("expected 1 permanent failure, got %d", snapshot.EventsFailedPermanent)
 	}
 }
 

@@ -14,6 +14,7 @@ flowchart LR
     workers[Workers concorrentes<br/>goroutines]
     processor[Processamento do evento]
     health[GET /health]
+    metrics[GET /metrics]
 
     client -->|POST /events| api
     api --> handler
@@ -27,6 +28,10 @@ flowchart LR
     client -->|GET /health| api
     api --> health
     health --> healthResponse[status, queueLength, queueCapacity]
+
+    client -->|GET /metrics| api
+    api --> metrics
+    metrics --> metricsResponse[eventsQueued, eventsProcessed, retries, failures]
 ```
 
 ## Fluxo de configuração
@@ -77,9 +82,10 @@ sequenceDiagram
 4. A API responde `202 Accepted` rapidamente.
 5. Os workers, rodando em goroutines, consomem a fila e processam os eventos em paralelo.
 6. Se o processamento falhar, o worker aplica retry com backoff antes de registrar falha permanente.
-7. A aplicação registra logs estruturados com campos como `event_id`, `event_type` e `worker_id`.
-8. O endpoint `GET /health` mostra o estado básico da aplicação e da fila.
-9. Quando a aplicação recebe `Ctrl+C` ou `SIGTERM`, ela executa shutdown gracioso.
+7. A aplicação atualiza métricas em memória para eventos enfileirados, rejeitados, processados, retentados e com falha permanente.
+8. A aplicação registra logs estruturados com campos como `event_id`, `event_type` e `worker_id`.
+9. O endpoint `GET /health` mostra o estado básico da aplicação e da fila.
+10. Quando a aplicação recebe `Ctrl+C` ou `SIGTERM`, ela executa shutdown gracioso.
 
 ## Componentes atuais
 
@@ -88,5 +94,6 @@ Cliente externo -> HTTP server -> handler -> validação -> fila interna -> work
 ```
 
 A fila ainda é em memória. Em uma evolução futura, ela pode ser substituída ou complementada por uma fila externa, como RabbitMQ, Kafka, SQS ou Redis Streams.
+
 
 

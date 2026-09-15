@@ -5,18 +5,21 @@ import "net/http"
 type App struct {
 	config     Config
 	eventQueue chan Event
+	metrics    *Metrics
 }
 
 func NewApp(config Config) App {
 	return App{
 		config:     config,
 		eventQueue: make(chan Event, config.QueueSize),
+		metrics:    NewMetrics(),
 	}
 }
 
 func (app App) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", app.healthHandler)
+	mux.HandleFunc("GET /metrics", app.metricsHandler)
 	mux.HandleFunc("POST /events", app.createEventHandler)
 
 	return mux

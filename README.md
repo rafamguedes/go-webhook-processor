@@ -66,6 +66,24 @@ Exemplo de resposta:
 }
 ```
 
+
+### GET /metrics
+
+Retorna um snapshot dos principais contadores operacionais da aplicação.
+
+Exemplo de resposta:
+
+```json
+{
+  "eventsQueued": 10,
+  "eventsRejected": 2,
+  "eventsProcessed": 8,
+  "eventsFailedPermanent": 1,
+  "eventRetries": 3,
+  "queueLength": 1,
+  "queueCapacity": 100
+}
+```
 ### POST /events
 
 Recebe um evento para processamento assíncrono.
@@ -107,7 +125,8 @@ config.go      leitura e validação de configurações por ambiente
 logger.go      configuração de logs estruturados com slog
 app.go         estado da aplicação, fila interna e registro das rotas
 models.go      contratos de entrada e saída usados pela API
-handlers.go    handlers HTTP, validação e respostas JSON
+metrics.go     contadores thread-safe e snapshot de métricas
+handlers.go    handlers HTTP, validação, métricas e respostas JSON
 worker.go      workers, retry e backoff do processamento assíncrono
 main_test.go   testes automatizados dos handlers e configurações
 worker_test.go testes automatizados do retry/backoff
@@ -341,7 +360,7 @@ shutdown complete
 
 Os logs incluem campos como `event_id`, `event_type`, `worker_id`, `queue_length`, `queue_capacity`, `attempt`, `backoff` e `error`, facilitando busca e análise em ferramentas de observabilidade.
 
-O endpoint `/health` também expõe o tamanho atual da fila por meio dos campos `queueLength` e `queueCapacity`.
+O endpoint `/health` expõe o estado básico da aplicação, e o endpoint `/metrics` expõe contadores como `eventsQueued`, `eventsRejected`, `eventsProcessed`, `eventsFailedPermanent` e `eventRetries`.
 
 ## Limitações atuais
 
@@ -352,3 +371,4 @@ Antes de uso real em produção, os próximos passos recomendados são:
 - persistir eventos em banco ou fila externa
 - adicionar dead-letter queue para eventos com falha permanente
 - adicionar métricas
+
