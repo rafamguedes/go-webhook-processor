@@ -3,18 +3,20 @@ package main
 import "net/http"
 
 type App struct {
-	config      Config
-	eventQueue  chan Event
-	metrics     *Metrics
-	deadLetters *DeadLetterStore
+	config       Config
+	eventQueue   chan Event
+	metrics      *Metrics
+	deadLetters  *DeadLetterStore
+	deduplicator *EventDeduplicator
 }
 
 func NewApp(config Config) App {
 	return App{
-		config:      config,
-		eventQueue:  make(chan Event, config.QueueSize),
-		metrics:     NewMetrics(),
-		deadLetters: NewDeadLetterStore(config.DeadLetterCapacity),
+		config:       config,
+		eventQueue:   make(chan Event, config.QueueSize),
+		metrics:      NewMetrics(),
+		deadLetters:  NewDeadLetterStore(config.DeadLetterCapacity),
+		deduplicator: NewEventDeduplicator(config.EventDedupCapacity),
 	}
 }
 

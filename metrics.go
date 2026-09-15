@@ -5,6 +5,7 @@ import "sync/atomic"
 type Metrics struct {
 	eventsQueued          atomic.Int64
 	eventsRejected        atomic.Int64
+	eventsDuplicated      atomic.Int64
 	eventsProcessed       atomic.Int64
 	eventsFailedPermanent atomic.Int64
 	eventRetries          atomic.Int64
@@ -13,6 +14,7 @@ type Metrics struct {
 type MetricsResponse struct {
 	EventsQueued          int64 `json:"eventsQueued"`
 	EventsRejected        int64 `json:"eventsRejected"`
+	EventsDuplicated      int64 `json:"eventsDuplicated"`
 	EventsProcessed       int64 `json:"eventsProcessed"`
 	EventsFailedPermanent int64 `json:"eventsFailedPermanent"`
 	EventRetries          int64 `json:"eventRetries"`
@@ -32,6 +34,10 @@ func (metrics *Metrics) IncEventsRejected() {
 	metrics.eventsRejected.Add(1)
 }
 
+func (metrics *Metrics) IncEventsDuplicated() {
+	metrics.eventsDuplicated.Add(1)
+}
+
 func (metrics *Metrics) IncEventsProcessed() {
 	metrics.eventsProcessed.Add(1)
 }
@@ -48,6 +54,7 @@ func (metrics *Metrics) Snapshot(queueLength int, queueCapacity int) MetricsResp
 	return MetricsResponse{
 		EventsQueued:          metrics.eventsQueued.Load(),
 		EventsRejected:        metrics.eventsRejected.Load(),
+		EventsDuplicated:      metrics.eventsDuplicated.Load(),
 		EventsProcessed:       metrics.eventsProcessed.Load(),
 		EventsFailedPermanent: metrics.eventsFailedPermanent.Load(),
 		EventRetries:          metrics.eventRetries.Load(),

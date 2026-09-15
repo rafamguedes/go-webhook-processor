@@ -22,6 +22,19 @@ Content-Type: application/json
   }
 }
 
+
+### Evento duplicado: repetir evt-001 deve retornar 409 Conflict
+POST {{baseUrl}}/events
+Content-Type: application/json
+
+{
+  "id": "evt-001",
+  "type": "payment.created",
+  "payload": {
+    "amount": 100,
+    "currency": "BRL"
+  }
+}
 ### Enviar segundo evento válido
 POST {{baseUrl}}/events
 Content-Type: application/json
@@ -79,5 +92,6 @@ Content-Type: application/json
   "payload": {
     "amount": 100
   }
+
 
 

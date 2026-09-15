@@ -77,6 +77,7 @@ Exemplo de resposta:
 {
   "eventsQueued": 10,
   "eventsRejected": 2,
+  "eventsDuplicated": 1,
   "eventsProcessed": 8,
   "eventsFailedPermanent": 1,
   "eventRetries": 3,
@@ -141,6 +142,7 @@ Possíveis respostas:
 202 Accepted            evento validado e enfileirado
 400 Bad Request         JSON inválido ou campos obrigatórios ausentes
 503 Service Unavailable fila interna cheia
+409 Conflict            event.id duplicado
 ```
 
 ## Arquitetura
@@ -152,6 +154,7 @@ logger.go      configuração de logs estruturados com slog
 app.go         estado da aplicação, fila interna e registro das rotas
 models.go      contratos de entrada e saída usados pela API
 metrics.go     contadores thread-safe e snapshot de métricas
+dedup.go       controle de idempotência em memória por event.id
 deadletter.go  armazenamento em memória dos eventos com falha permanente
 handlers.go    handlers HTTP, validação, métricas e respostas JSON
 worker.go      workers, retry e backoff do processamento assíncrono
@@ -177,6 +180,7 @@ LOG_FORMAT=json
 MAX_RETRIES=3
 RETRY_BACKOFF_SECONDS=1
 DEAD_LETTER_CAPACITY=100
+EVENT_DEDUP_CAPACITY=1000
 ```
 
 Descrição das variáveis:
@@ -191,6 +195,7 @@ LOG_FORMAT                    formato dos logs: json ou text
 MAX_RETRIES                   quantidade de novas tentativas após a primeira falha
 RETRY_BACKOFF_SECONDS         base em segundos para o backoff entre tentativas
 DEAD_LETTER_CAPACITY          quantidade máxima de eventos mantidos na dead-letter queue
+EVENT_DEDUP_CAPACITY          quantidade máxima de event.id mantidos para deduplicação
 ```
 
 Exemplo no PowerShell:
@@ -205,6 +210,22 @@ O arquivo `.env.example` documenta os valores esperados, mas a aplicação não 
 
 Para produção, use `LOG_FORMAT=json`. Para leitura local no terminal, `LOG_FORMAT=text` pode ser mais confortável.
 
+
+## Idempotência
+
+O endpoint `POST /events` usa o campo `id` como chave de idempotência.
+
+Se o mesmo `event.id` for recebido novamente, a aplicação rejeita o evento com:
+
+```text
+409 Conflict
+```
+
+Isso evita processamento duplicado em cenários comuns de webhook, nos quais o sistema externo pode reenviar o mesmo evento por timeout, falha de rede ou política própria de retry.
+
+A memória de deduplicação é limitada por `EVENT_DEDUP_CAPACITY`. Quando a capacidade é atingida, o ID mais antigo é descartado para abrir espaço para novos IDs.
+
+Nesta versão, a deduplicação ainda é em memória. Em produção real, o próximo passo seria persistir as chaves de idempotência em banco, cache distribuído ou storage transacional.
 ## Concorrência
 
 A aplicação usa uma fila interna baseada em `chan Event`:
@@ -231,6 +252,7 @@ Com os valores padrão:
 MAX_RETRIES=3
 RETRY_BACKOFF_SECONDS=1
 DEAD_LETTER_CAPACITY=100
+EVENT_DEDUP_CAPACITY=1000
 ```
 
 Um evento pode ter até 4 tentativas no total:
@@ -405,7 +427,7 @@ shutdown complete
 
 Os logs incluem campos como `event_id`, `event_type`, `worker_id`, `queue_length`, `queue_capacity`, `attempt`, `backoff` e `error`, facilitando busca e análise em ferramentas de observabilidade.
 
-O endpoint `/health` expõe o estado básico da aplicação, e o endpoint `/metrics` expõe contadores como `eventsQueued`, `eventsRejected`, `eventsProcessed`, `eventsFailedPermanent` e `eventRetries`.
+O endpoint `/health` expõe o estado básico da aplicação, e o endpoint `/metrics` expõe contadores como `eventsQueued`, `eventsRejected`, `eventsDuplicated`, `eventsProcessed`, `eventsFailedPermanent` e `eventRetries`.
 
 ## Limitações atuais
 
@@ -416,5 +438,6 @@ Antes de uso real em produção, os próximos passos recomendados são:
 - persistir eventos em banco ou fila externa
 - adicionar dead-letter queue para eventos com falha permanente
 - adicionar métricas
+
 
 

@@ -53,6 +53,14 @@ func (app App) createEventHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !app.deduplicator.Remember(event.ID) {
+		app.metrics.IncEventsRejected()
+		app.metrics.IncEventsDuplicated()
+		slog.Warn("event rejected", "reason", "duplicate event id", "event_id", event.ID, "event_type", event.Type)
+		writeError(w, http.StatusConflict, "duplicate event id")
+		return
+	}
+
 	select {
 	case app.eventQueue <- event:
 		app.metrics.IncEventsQueued()
