@@ -14,6 +14,7 @@ func TestLoadConfigUsesDefaults(t *testing.T) {
 	t.Setenv("WORKER_COUNT", "")
 	t.Setenv("READ_HEADER_TIMEOUT_SECONDS", "")
 	t.Setenv("SHUTDOWN_TIMEOUT_SECONDS", "")
+	t.Setenv("LOG_FORMAT", "")
 
 	config, err := LoadConfig()
 	if err != nil {
@@ -31,6 +32,10 @@ func TestLoadConfigUsesDefaults(t *testing.T) {
 	if config.WorkerCount != 3 {
 		t.Fatalf("expected default worker count 3, got %d", config.WorkerCount)
 	}
+
+	if config.LogFormat != "json" {
+		t.Fatalf("expected default log format json, got %s", config.LogFormat)
+	}
 }
 
 func TestLoadConfigReadsEnvironmentVariables(t *testing.T) {
@@ -39,6 +44,7 @@ func TestLoadConfigReadsEnvironmentVariables(t *testing.T) {
 	t.Setenv("WORKER_COUNT", "2")
 	t.Setenv("READ_HEADER_TIMEOUT_SECONDS", "7")
 	t.Setenv("SHUTDOWN_TIMEOUT_SECONDS", "15")
+	t.Setenv("LOG_FORMAT", "text")
 
 	config, err := LoadConfig()
 	if err != nil {
@@ -56,6 +62,10 @@ func TestLoadConfigReadsEnvironmentVariables(t *testing.T) {
 	if config.WorkerCount != 2 {
 		t.Fatalf("expected worker count 2, got %d", config.WorkerCount)
 	}
+
+	if config.LogFormat != "text" {
+		t.Fatalf("expected log format text, got %s", config.LogFormat)
+	}
 }
 
 func TestLoadConfigRejectsInvalidQueueSize(t *testing.T) {
@@ -66,6 +76,16 @@ func TestLoadConfigRejectsInvalidQueueSize(t *testing.T) {
 		t.Fatal("expected config to reject invalid queue size")
 	}
 }
+
+func TestLoadConfigRejectsInvalidLogFormat(t *testing.T) {
+	t.Setenv("LOG_FORMAT", "xml")
+
+	_, err := LoadConfig()
+	if err == nil {
+		t.Fatal("expected config to reject invalid log format")
+	}
+}
+
 func TestHealthHandler(t *testing.T) {
 	app := newTestApp()
 
@@ -144,5 +164,6 @@ func newTestApp() App {
 		WorkerCount:              3,
 		ReadHeaderTimeoutSeconds: 5,
 		ShutdownTimeoutSeconds:   10,
+		LogFormat:                "json",
 	})
 }

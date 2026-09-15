@@ -103,6 +103,7 @@ Possíveis respostas:
 ```text
 main.go       bootstrap, servidor HTTP e encerramento gracioso
 config.go     leitura e validação de configurações por ambiente
+logger.go     configuração de logs estruturados com slog
 app.go        estado da aplicação, fila interna e registro das rotas
 models.go     contratos de entrada e saída usados pela API
 handlers.go   handlers HTTP, validação e respostas JSON
@@ -121,6 +122,7 @@ QUEUE_SIZE=100
 WORKER_COUNT=3
 READ_HEADER_TIMEOUT_SECONDS=5
 SHUTDOWN_TIMEOUT_SECONDS=10
+LOG_FORMAT=json
 ```
 
 Descrição das variáveis:
@@ -131,6 +133,7 @@ QUEUE_SIZE                    quantidade máxima de eventos aguardando na fila i
 WORKER_COUNT                  quantidade de workers processando eventos em paralelo
 READ_HEADER_TIMEOUT_SECONDS   timeout para leitura dos headers HTTP
 SHUTDOWN_TIMEOUT_SECONDS      tempo máximo para encerramento gracioso do servidor HTTP
+LOG_FORMAT                    formato dos logs: json ou text
 ```
 
 Exemplo no PowerShell:
@@ -142,6 +145,8 @@ go run .
 ```
 
 O arquivo `.env.example` documenta os valores esperados, mas a aplicação não carrega arquivos `.env` automaticamente.
+
+Para produção, use `LOG_FORMAT=json`. Para leitura local no terminal, `LOG_FORMAT=text` pode ser mais confortável.
 
 ## Concorrência
 
@@ -239,7 +244,7 @@ Enviar múltiplos eventos ajuda a observar os workers processando em paralelo pe
 
 ## Observabilidade atual
 
-A aplicação registra logs no console para os principais eventos operacionais:
+A aplicação registra logs estruturados no console para os principais eventos operacionais:
 
 ```text
 event queued
@@ -248,6 +253,8 @@ worker finished event
 worker stopped
 shutdown complete
 ```
+
+Os logs incluem campos como `event_id`, `event_type`, `worker_id`, `queue_length`, `queue_capacity` e `error`, facilitando busca e análise em ferramentas de observabilidade.
 
 O endpoint `/health` também expõe o tamanho atual da fila por meio dos campos `queueLength` e `queueCapacity`.
 
@@ -262,5 +269,6 @@ Antes de uso real em produção, os próximos passos recomendados são:
 - adicionar métricas
 - adicionar retry com backoff
 - adicionar Dockerfile
+
 
 

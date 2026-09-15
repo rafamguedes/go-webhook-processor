@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"fmt"
+	"log/slog"
 	"net/http"
+	"os"
 	"os/signal"
 	"sync"
 	"syscall"
@@ -13,8 +15,10 @@ import (
 func main() {
 	config, err := LoadConfig()
 	if err != nil {
-		log.Fatal(err)
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
+	setupLogger(config)
 
 	app := NewApp(config)
 
@@ -29,7 +33,7 @@ func main() {
 
 	serverErrors := make(chan error, 1)
 	go func() {
-		log.Printf("server listening on http://localhost%s", config.ServerAddress())
+		slog.Info("server listening", "url", "http://localhost"+config.ServerAddress())
 		serverErrors <- server.ListenAndServe()
 	}()
 
@@ -39,21 +43,22 @@ func main() {
 	select {
 	case err := <-serverErrors:
 		if !errors.Is(err, http.ErrServerClosed) {
-			log.Fatal(err)
+			slog.Error("server stopped unexpectedly", "error", err)
+			os.Exit(1)
 		}
 	case <-shutdownSignal.Done():
-		log.Println("shutdown signal received")
+		slog.Info("shutdown signal received")
 	}
 
 	shutdownContext, cancel := context.WithTimeout(context.Background(), config.ShutdownTimeout())
 	defer cancel()
 
 	if err := server.Shutdown(shutdownContext); err != nil {
-		log.Printf("server shutdown error: %v", err)
+		slog.Error("server shutdown error", "error", err)
 	}
 
 	close(app.eventQueue)
 	workers.Wait()
 
-	log.Println("shutdown complete")
+	slog.Info("shutdown complete")
 }

@@ -13,6 +13,7 @@ type Config struct {
 	WorkerCount              int
 	ReadHeaderTimeoutSeconds int
 	ShutdownTimeoutSeconds   int
+	LogFormat                string
 }
 
 func LoadConfig() (Config, error) {
@@ -22,6 +23,7 @@ func LoadConfig() (Config, error) {
 		WorkerCount:              getEnvAsInt("WORKER_COUNT", 3),
 		ReadHeaderTimeoutSeconds: getEnvAsInt("READ_HEADER_TIMEOUT_SECONDS", 5),
 		ShutdownTimeoutSeconds:   getEnvAsInt("SHUTDOWN_TIMEOUT_SECONDS", 10),
+		LogFormat:                getEnv("LOG_FORMAT", "json"),
 	}
 
 	if config.QueueSize <= 0 {
@@ -38,6 +40,10 @@ func LoadConfig() (Config, error) {
 
 	if config.ShutdownTimeoutSeconds <= 0 {
 		return Config{}, fmt.Errorf("SHUTDOWN_TIMEOUT_SECONDS must be greater than zero")
+	}
+
+	if config.LogFormat != "json" && config.LogFormat != "text" {
+		return Config{}, fmt.Errorf("LOG_FORMAT must be json or text")
 	}
 
 	return config, nil

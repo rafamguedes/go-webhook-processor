@@ -1,7 +1,7 @@
 package main
 
 import (
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -20,13 +20,13 @@ func worker(workerID int, eventQueue <-chan Event, workers *sync.WaitGroup) {
 		processEvent(workerID, event)
 	}
 
-	log.Printf("worker=%d stopped", workerID)
+	slog.Info("worker stopped", "worker_id", workerID)
 }
 
 func processEvent(workerID int, event Event) {
-	log.Printf("worker=%d processing event: id=%s type=%s", workerID, event.ID, event.Type)
+	slog.Info("event processing started", "worker_id", workerID, "event_id", event.ID, "event_type", event.Type)
 
 	time.Sleep(2 * time.Second)
 
-	log.Printf("worker=%d finished event: id=%s type=%s", workerID, event.ID, event.Type)
+	slog.Info("event processing finished", "worker_id", workerID, "event_id", event.ID, "event_type", event.Type)
 }

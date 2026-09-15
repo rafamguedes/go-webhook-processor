@@ -76,8 +76,9 @@ sequenceDiagram
 3. Se o evento for válido, ele entra na fila interna `chan Event`.
 4. A API responde `202 Accepted` rapidamente.
 5. Os workers, rodando em goroutines, consomem a fila e processam os eventos em paralelo.
-6. O endpoint `GET /health` mostra o estado básico da aplicação e da fila.
-7. Quando a aplicação recebe `Ctrl+C` ou `SIGTERM`, ela executa shutdown gracioso.
+6. A aplicação registra logs estruturados com campos como `event_id`, `event_type` e `worker_id`.
+7. O endpoint `GET /health` mostra o estado básico da aplicação e da fila.
+8. Quando a aplicação recebe `Ctrl+C` ou `SIGTERM`, ela executa shutdown gracioso.
 
 ## Componentes atuais
 
@@ -86,3 +87,4 @@ Cliente externo -> HTTP server -> handler -> validação -> fila interna -> work
 ```
 
 A fila ainda é em memória. Em uma evolução futura, ela pode ser substituída ou complementada por uma fila externa, como RabbitMQ, Kafka, SQS ou Redis Streams.
+

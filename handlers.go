@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -23,24 +23,28 @@ func (app App) createEventHandler(w http.ResponseWriter, r *http.Request) {
 	var event Event
 
 	if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
+		slog.Warn("invalid event payload", "error", err)
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 
 	if event.ID == "" {
+		slog.Warn("event rejected", "reason", "missing id", "event_type", event.Type)
 		writeError(w, http.StatusBadRequest, "id is required")
 		return
 	}
 
 	if event.Type == "" {
+		slog.Warn("event rejected", "reason", "missing type", "event_id", event.ID)
 		writeError(w, http.StatusBadRequest, "type is required")
 		return
 	}
 
 	select {
 	case app.eventQueue <- event:
-		log.Printf("event queued: id=%s type=%s", event.ID, event.Type)
+		slog.Info("event queued", "event_id", event.ID, "event_type", event.Type, "queue_length", len(app.eventQueue), "queue_capacity", cap(app.eventQueue))
 	default:
+		slog.Warn("event queue is full", "event_id", event.ID, "event_type", event.Type, "queue_capacity", cap(app.eventQueue))
 		writeError(w, http.StatusServiceUnavailable, "event queue is full")
 		return
 	}
