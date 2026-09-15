@@ -2,19 +2,25 @@ package main
 
 import (
 	"log"
+	"sync"
 	"time"
 )
 
-func startWorkers(count int, eventQueue <-chan Event) {
+func startWorkers(count int, eventQueue <-chan Event, workers *sync.WaitGroup) {
 	for workerID := 1; workerID <= count; workerID++ {
-		go worker(workerID, eventQueue)
+		workers.Add(1)
+		go worker(workerID, eventQueue, workers)
 	}
 }
 
-func worker(workerID int, eventQueue <-chan Event) {
+func worker(workerID int, eventQueue <-chan Event, workers *sync.WaitGroup) {
+	defer workers.Done()
+
 	for event := range eventQueue {
 		processEvent(workerID, event)
 	}
+
+	log.Printf("worker=%d stopped", workerID)
 }
 
 func processEvent(workerID int, event Event) {

@@ -1,15 +1,21 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
 	"net/http"
+	"os/signal"
+	"sync"
+	"syscall"
 	"time"
 )
 
 func main() {
 	app := NewApp()
 
-	startWorkers(workerCount, app.eventQueue)
+	var workers sync.WaitGroup
+	startWorkers(workerCount, app.eventQueue, &workers)
 
 	server := &http.Server{
 		Addr:              ":8080",
@@ -17,9 +23,33 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Println("server listening on http://localhost:8080")
+	serverErrors := make(chan error, 1)
+	go func() {
+		log.Println("server listening on http://localhost:8080")
+		serverErrors <- server.ListenAndServe()
+	}()
 
-	if err := server.ListenAndServe(); err != nil {
-		log.Fatal(err)
+	shutdownSignal, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	select {
+	case err := <-serverErrors:
+		if !errors.Is(err, http.ErrServerClosed) {
+			log.Fatal(err)
+		}
+	case <-shutdownSignal.Done():
+		log.Println("shutdown signal received")
 	}
+
+	shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(shutdownContext); err != nil {
+		log.Printf("server shutdown error: %v", err)
+	}
+
+	close(app.eventQueue)
+	workers.Wait()
+
+	log.Println("shutdown complete")
 }

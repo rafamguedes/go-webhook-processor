@@ -82,7 +82,7 @@ Possíveis respostas:
 ## Arquitetura
 
 ```text
-main.go       bootstrap da aplicação e configuração do servidor HTTP
+main.go       bootstrap, servidor HTTP e encerramento gracioso
 app.go        estado da aplicação, fila interna e registro das rotas
 models.go     contratos de entrada e saída usados pela API
 handlers.go   handlers HTTP, validação e respostas JSON
@@ -101,7 +101,7 @@ eventQueue chan Event
 Os workers são iniciados como goroutines:
 
 ```go
-go worker(workerID, eventQueue)
+go worker(workerID, eventQueue, workers)
 ```
 
 Com a configuração atual, até 3 eventos podem ser processados em paralelo:
@@ -115,6 +115,20 @@ A fila possui capacidade para 100 eventos aguardando processamento:
 ```go
 const queueSize = 100
 ```
+
+## Encerramento gracioso
+
+A aplicação escuta sinais de interrupção do sistema, como `Ctrl+C` no terminal ou `SIGTERM` em ambientes de orquestração.
+
+Ao receber o sinal, o serviço:
+
+- para de aceitar novas requisições HTTP
+- aguarda o servidor HTTP encerrar com timeout de 10 segundos
+- fecha a fila interna de eventos
+- espera os workers terminarem os eventos já retirados da fila
+- registra `shutdown complete` ao final do processo
+
+Isso evita encerrar o processo de forma abrupta enquanto eventos ainda estão em processamento.
 
 ## Requisitos
 
@@ -137,6 +151,8 @@ A aplicação sobe em:
 ```text
 http://localhost:8080
 ```
+
+Para encerrar localmente, pressione `Ctrl+C` no terminal em que o serviço está rodando.
 
 ## Testes
 
@@ -186,20 +202,22 @@ A aplicação registra logs no console para os principais eventos operacionais:
 event queued
 worker processing event
 worker finished event
+worker stopped
+shutdown complete
 ```
 
 O endpoint `/health` também expõe o tamanho atual da fila por meio dos campos `queueLength` e `queueCapacity`.
 
 ## Limitações atuais
 
-Esta versão ainda usa fila em memória. Isso significa que eventos pendentes são perdidos se o processo for encerrado antes do processamento.
+Esta versão ainda usa fila em memória. Isso significa que eventos pendentes podem ser perdidos se o processo cair de forma abrupta, por exemplo em um kill forçado, falha da máquina ou reinício inesperado.
 
 Antes de uso real em produção, os próximos passos recomendados são:
 
 - persistir eventos em banco ou fila externa
-- adicionar shutdown gracioso
 - adicionar logs estruturados
 - adicionar métricas
 - adicionar retry com backoff
 - adicionar configuração por variáveis de ambiente
 - adicionar Dockerfile
+
