@@ -15,6 +15,8 @@ func TestLoadConfigUsesDefaults(t *testing.T) {
 	t.Setenv("READ_HEADER_TIMEOUT_SECONDS", "")
 	t.Setenv("SHUTDOWN_TIMEOUT_SECONDS", "")
 	t.Setenv("LOG_FORMAT", "")
+	t.Setenv("MAX_RETRIES", "")
+	t.Setenv("RETRY_BACKOFF_SECONDS", "")
 
 	config, err := LoadConfig()
 	if err != nil {
@@ -36,6 +38,14 @@ func TestLoadConfigUsesDefaults(t *testing.T) {
 	if config.LogFormat != "json" {
 		t.Fatalf("expected default log format json, got %s", config.LogFormat)
 	}
+
+	if config.MaxRetries != 3 {
+		t.Fatalf("expected default max retries 3, got %d", config.MaxRetries)
+	}
+
+	if config.RetryBackoffSeconds != 1 {
+		t.Fatalf("expected default retry backoff 1, got %d", config.RetryBackoffSeconds)
+	}
 }
 
 func TestLoadConfigReadsEnvironmentVariables(t *testing.T) {
@@ -45,6 +55,8 @@ func TestLoadConfigReadsEnvironmentVariables(t *testing.T) {
 	t.Setenv("READ_HEADER_TIMEOUT_SECONDS", "7")
 	t.Setenv("SHUTDOWN_TIMEOUT_SECONDS", "15")
 	t.Setenv("LOG_FORMAT", "text")
+	t.Setenv("MAX_RETRIES", "5")
+	t.Setenv("RETRY_BACKOFF_SECONDS", "2")
 
 	config, err := LoadConfig()
 	if err != nil {
@@ -66,6 +78,14 @@ func TestLoadConfigReadsEnvironmentVariables(t *testing.T) {
 	if config.LogFormat != "text" {
 		t.Fatalf("expected log format text, got %s", config.LogFormat)
 	}
+
+	if config.MaxRetries != 5 {
+		t.Fatalf("expected max retries 5, got %d", config.MaxRetries)
+	}
+
+	if config.RetryBackoffSeconds != 2 {
+		t.Fatalf("expected retry backoff 2, got %d", config.RetryBackoffSeconds)
+	}
 }
 
 func TestLoadConfigRejectsInvalidQueueSize(t *testing.T) {
@@ -83,6 +103,15 @@ func TestLoadConfigRejectsInvalidLogFormat(t *testing.T) {
 	_, err := LoadConfig()
 	if err == nil {
 		t.Fatal("expected config to reject invalid log format")
+	}
+}
+
+func TestLoadConfigRejectsNegativeMaxRetries(t *testing.T) {
+	t.Setenv("MAX_RETRIES", "-1")
+
+	_, err := LoadConfig()
+	if err == nil {
+		t.Fatal("expected config to reject negative max retries")
 	}
 }
 
@@ -158,12 +187,18 @@ func TestCreateEventHandlerRejectsMissingID(t *testing.T) {
 }
 
 func newTestApp() App {
-	return NewApp(Config{
+	return NewApp(testConfig())
+}
+
+func testConfig() Config {
+	return Config{
 		Port:                     "8080",
 		QueueSize:                100,
 		WorkerCount:              3,
 		ReadHeaderTimeoutSeconds: 5,
 		ShutdownTimeoutSeconds:   10,
 		LogFormat:                "json",
-	})
+		MaxRetries:               3,
+		RetryBackoffSeconds:      1,
+	}
 }

@@ -1,32 +1,73 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 )
 
-func startWorkers(count int, eventQueue <-chan Event, workers *sync.WaitGroup) {
+type eventProcessor func(workerID int, event Event) error
+
+func startWorkers(count int, eventQueue <-chan Event, workers *sync.WaitGroup, config Config) {
 	for workerID := 1; workerID <= count; workerID++ {
 		workers.Add(1)
-		go worker(workerID, eventQueue, workers)
+		go worker(workerID, eventQueue, workers, config)
 	}
 }
 
-func worker(workerID int, eventQueue <-chan Event, workers *sync.WaitGroup) {
+func worker(workerID int, eventQueue <-chan Event, workers *sync.WaitGroup, config Config) {
 	defer workers.Done()
 
 	for event := range eventQueue {
-		processEvent(workerID, event)
+		processEventWithRetry(workerID, event, config, processEvent, time.Sleep)
 	}
 
 	slog.Info("worker stopped", "worker_id", workerID)
 }
 
-func processEvent(workerID int, event Event) {
+func processEventWithRetry(workerID int, event Event, config Config, processor eventProcessor, sleep func(time.Duration)) bool {
+	maxAttempts := config.MaxRetries + 1
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		err := processor(workerID, event)
+		if err == nil {
+			slog.Info("event processing succeeded", "worker_id", workerID, "event_id", event.ID, "event_type", event.Type, "attempt", attempt)
+			return true
+		}
+
+		if attempt == maxAttempts {
+			slog.Error("event processing failed permanently", "worker_id", workerID, "event_id", event.ID, "event_type", event.Type, "attempt", attempt, "max_attempts", maxAttempts, "error", err)
+			return false
+		}
+
+		backoff := config.RetryBackoff(attempt)
+		slog.Warn("event processing failed; retrying", "worker_id", workerID, "event_id", event.ID, "event_type", event.Type, "attempt", attempt, "max_attempts", maxAttempts, "backoff", backoff.String(), "error", err)
+		sleep(backoff)
+	}
+
+	return false
+}
+
+func processEvent(workerID int, event Event) error {
 	slog.Info("event processing started", "worker_id", workerID, "event_id", event.ID, "event_type", event.Type)
 
 	time.Sleep(2 * time.Second)
 
+	if shouldSimulateFailure(event) {
+		return fmt.Errorf("simulated processing failure")
+	}
+
 	slog.Info("event processing finished", "worker_id", workerID, "event_id", event.ID, "event_type", event.Type)
+	return nil
+}
+
+func shouldSimulateFailure(event Event) bool {
+	value, exists := event.Payload["simulateFailure"]
+	if !exists {
+		return false
+	}
+
+	shouldFail, ok := value.(bool)
+	return ok && shouldFail
 }

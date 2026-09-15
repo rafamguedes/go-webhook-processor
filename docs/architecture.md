@@ -76,15 +76,17 @@ sequenceDiagram
 3. Se o evento for válido, ele entra na fila interna `chan Event`.
 4. A API responde `202 Accepted` rapidamente.
 5. Os workers, rodando em goroutines, consomem a fila e processam os eventos em paralelo.
-6. A aplicação registra logs estruturados com campos como `event_id`, `event_type` e `worker_id`.
-7. O endpoint `GET /health` mostra o estado básico da aplicação e da fila.
-8. Quando a aplicação recebe `Ctrl+C` ou `SIGTERM`, ela executa shutdown gracioso.
+6. Se o processamento falhar, o worker aplica retry com backoff antes de registrar falha permanente.
+7. A aplicação registra logs estruturados com campos como `event_id`, `event_type` e `worker_id`.
+8. O endpoint `GET /health` mostra o estado básico da aplicação e da fila.
+9. Quando a aplicação recebe `Ctrl+C` ou `SIGTERM`, ela executa shutdown gracioso.
 
 ## Componentes atuais
 
 ```text
-Cliente externo -> HTTP server -> handler -> validação -> fila interna -> workers -> processamento
+Cliente externo -> HTTP server -> handler -> validação -> fila interna -> workers -> retry/backoff -> processamento
 ```
 
 A fila ainda é em memória. Em uma evolução futura, ela pode ser substituída ou complementada por uma fila externa, como RabbitMQ, Kafka, SQS ou Redis Streams.
+
 

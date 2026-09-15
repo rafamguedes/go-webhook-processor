@@ -1,0 +1,75 @@
+@baseUrl = http://localhost:8080
+
+### Health check
+GET {{baseUrl}}/health
+
+### Enviar evento válido
+POST {{baseUrl}}/events
+Content-Type: application/json
+
+{
+  "id": "evt-001",
+  "type": "payment.created",
+  "payload": {
+    "amount": 100,
+    "currency": "BRL"
+  }
+}
+
+### Enviar segundo evento válido
+POST {{baseUrl}}/events
+Content-Type: application/json
+
+{
+  "id": "evt-002",
+  "type": "order.approved",
+  "payload": {
+    "orderId": "ord-123",
+    "customerId": "cus-456"
+  }
+}
+
+### Simular falha de processamento para testar retry/backoff
+POST {{baseUrl}}/events
+Content-Type: application/json
+
+{
+  "id": "evt-fail-001",
+  "type": "payment.created",
+  "payload": {
+    "simulateFailure": true
+  }
+}
+
+### Evento inválido: sem id
+POST {{baseUrl}}/events
+Content-Type: application/json
+
+{
+  "type": "payment.created",
+  "payload": {
+    "amount": 100
+  }
+}
+
+### Evento inválido: sem type
+POST {{baseUrl}}/events
+Content-Type: application/json
+
+{
+  "id": "evt-invalid-001",
+  "payload": {
+    "amount": 100
+  }
+}
+
+### JSON inválido
+POST {{baseUrl}}/events
+Content-Type: application/json
+
+{
+  "id": "evt-invalid-json",
+  "type": "payment.created",
+  "payload": {
+    "amount": 100
+  }

@@ -107,7 +107,7 @@ logger.go     configuração de logs estruturados com slog
 app.go        estado da aplicação, fila interna e registro das rotas
 models.go     contratos de entrada e saída usados pela API
 handlers.go   handlers HTTP, validação e respostas JSON
-worker.go     workers responsáveis pelo processamento assíncrono
+worker.go     workers, retry e backoff do processamento assíncrono
 main_test.go  testes automatizados dos handlers e configurações
 .env.example  exemplo de variáveis de ambiente
 ```
@@ -123,6 +123,8 @@ WORKER_COUNT=3
 READ_HEADER_TIMEOUT_SECONDS=5
 SHUTDOWN_TIMEOUT_SECONDS=10
 LOG_FORMAT=json
+MAX_RETRIES=3
+RETRY_BACKOFF_SECONDS=1
 ```
 
 Descrição das variáveis:
@@ -134,6 +136,8 @@ WORKER_COUNT                  quantidade de workers processando eventos em paral
 READ_HEADER_TIMEOUT_SECONDS   timeout para leitura dos headers HTTP
 SHUTDOWN_TIMEOUT_SECONDS      tempo máximo para encerramento gracioso do servidor HTTP
 LOG_FORMAT                    formato dos logs: json ou text
+MAX_RETRIES                  quantidade de novas tentativas após a primeira falha
+RETRY_BACKOFF_SECONDS        base em segundos para o backoff entre tentativas
 ```
 
 Exemplo no PowerShell:
@@ -146,7 +150,9 @@ go run .
 
 O arquivo `.env.example` documenta os valores esperados, mas a aplicação não carrega arquivos `.env` automaticamente.
 
-Para produção, use `LOG_FORMAT=json`. Para leitura local no terminal, `LOG_FORMAT=text` pode ser mais confortável.
+Para produção, use `LOG_FORMAT=json
+MAX_RETRIES=3
+RETRY_BACKOFF_SECONDS=1`. Para leitura local no terminal, `LOG_FORMAT=text` pode ser mais confortável.
 
 ## Concorrência
 
@@ -164,6 +170,33 @@ go worker(workerID, eventQueue, workers)
 
 A quantidade de workers e a capacidade da fila são configuradas por `WORKER_COUNT` e `QUEUE_SIZE`.
 
+
+## Retry com backoff
+
+Quando o processamento de um evento falha, o worker tenta processá-lo novamente antes de desistir definitivamente.
+
+Com os valores padrão:
+
+```text
+MAX_RETRIES=3
+RETRY_BACKOFF_SECONDS=1
+```
+
+Um evento pode ter até 4 tentativas no total:
+
+```text
+1 tentativa inicial + 3 retries
+```
+
+O backoff cresce de forma linear por tentativa:
+
+```text
+1ª falha -> aguarda 1 segundo
+2ª falha -> aguarda 2 segundos
+3ª falha -> aguarda 3 segundos
+```
+
+Se todas as tentativas falharem, o evento é registrado como falha permanente nos logs. Nesta versão, ainda não existe dead-letter queue; esse é um próximo passo natural antes de produção real.
 ## Encerramento gracioso
 
 A aplicação escuta sinais de interrupção do sistema, como `Ctrl+C` no terminal ou `SIGTERM` em ambientes de orquestração.
@@ -222,6 +255,10 @@ go build .
 
 O comando gera um binário executável do serviço.
 
+## Testes pela IDE
+
+O arquivo [`requests.http`](requests.http) contém chamadas prontas para uso com a extensão REST Client do VS Code.
+
 ## Testes manuais
 
 Health check:
@@ -241,6 +278,15 @@ Invoke-RestMethod `
 ```
 
 Enviar múltiplos eventos ajuda a observar os workers processando em paralelo pelos logs da aplicação.
+Simular falha de processamento para observar retries:
+
+```powershell
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://localhost:8080/events `
+  -ContentType "application/json" `
+  -Body '{"id":"evt-fail-001","type":"payment.created","payload":{"simulateFailure":true}}'
+```
 
 ## Observabilidade atual
 
@@ -269,6 +315,8 @@ Antes de uso real em produção, os próximos passos recomendados são:
 - adicionar métricas
 - adicionar retry com backoff
 - adicionar Dockerfile
+
+
 
 
 

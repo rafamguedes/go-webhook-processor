@@ -14,6 +14,8 @@ type Config struct {
 	ReadHeaderTimeoutSeconds int
 	ShutdownTimeoutSeconds   int
 	LogFormat                string
+	MaxRetries               int
+	RetryBackoffSeconds      int
 }
 
 func LoadConfig() (Config, error) {
@@ -24,6 +26,8 @@ func LoadConfig() (Config, error) {
 		ReadHeaderTimeoutSeconds: getEnvAsInt("READ_HEADER_TIMEOUT_SECONDS", 5),
 		ShutdownTimeoutSeconds:   getEnvAsInt("SHUTDOWN_TIMEOUT_SECONDS", 10),
 		LogFormat:                getEnv("LOG_FORMAT", "json"),
+		MaxRetries:               getEnvAsInt("MAX_RETRIES", 3),
+		RetryBackoffSeconds:      getEnvAsInt("RETRY_BACKOFF_SECONDS", 1),
 	}
 
 	if config.QueueSize <= 0 {
@@ -46,6 +50,14 @@ func LoadConfig() (Config, error) {
 		return Config{}, fmt.Errorf("LOG_FORMAT must be json or text")
 	}
 
+	if config.MaxRetries < 0 {
+		return Config{}, fmt.Errorf("MAX_RETRIES must be zero or greater")
+	}
+
+	if config.RetryBackoffSeconds <= 0 {
+		return Config{}, fmt.Errorf("RETRY_BACKOFF_SECONDS must be greater than zero")
+	}
+
 	return config, nil
 }
 
@@ -59,6 +71,10 @@ func (config Config) ReadHeaderTimeout() time.Duration {
 
 func (config Config) ShutdownTimeout() time.Duration {
 	return time.Duration(config.ShutdownTimeoutSeconds) * time.Second
+}
+
+func (config Config) RetryBackoff(attempt int) time.Duration {
+	return time.Duration(config.RetryBackoffSeconds*attempt) * time.Second
 }
 
 func getEnv(key string, fallback string) string {
