@@ -25,9 +25,8 @@ Cliente externo
     -> validação do JSON
       -> envio para a fila interna
         -> resposta HTTP 202 Accepted
-          -> workers processam eventos em background
+          -> workers processam eventos em background com retry/backoff
 ```
-
 
 ## Diagrama de alto nível
 
@@ -40,13 +39,15 @@ flowchart LR
     validation -->|válido| queue[Fila interna chan Event]
     queue --> accepted[202 Accepted]
     queue --> workers[Workers em goroutines]
-    workers --> processor[Processamento em background]
+    workers --> retry[Retry com backoff]
+    retry --> processor[Processamento em background]
 
     client -->|GET /health| health[Health check]
     health --> status[Status e métricas da fila]
 ```
 
 Veja também a documentação detalhada em [`docs/architecture.md`](docs/architecture.md).
+
 ## Endpoints
 
 ### GET /health
@@ -101,15 +102,19 @@ Possíveis respostas:
 ## Arquitetura
 
 ```text
-main.go       bootstrap, servidor HTTP e encerramento gracioso
-config.go     leitura e validação de configurações por ambiente
-logger.go     configuração de logs estruturados com slog
-app.go        estado da aplicação, fila interna e registro das rotas
-models.go     contratos de entrada e saída usados pela API
-handlers.go   handlers HTTP, validação e respostas JSON
-worker.go     workers, retry e backoff do processamento assíncrono
-main_test.go  testes automatizados dos handlers e configurações
-.env.example  exemplo de variáveis de ambiente
+main.go        bootstrap, servidor HTTP e encerramento gracioso
+config.go      leitura e validação de configurações por ambiente
+logger.go      configuração de logs estruturados com slog
+app.go         estado da aplicação, fila interna e registro das rotas
+models.go      contratos de entrada e saída usados pela API
+handlers.go    handlers HTTP, validação e respostas JSON
+worker.go      workers, retry e backoff do processamento assíncrono
+main_test.go   testes automatizados dos handlers e configurações
+worker_test.go testes automatizados do retry/backoff
+.env.example   exemplo de variáveis de ambiente
+Dockerfile     build de imagem containerizada
+.dockerignore  exclusões do contexto de build Docker
+requests.http  chamadas HTTP para testar pela IDE
 ```
 
 ## Configuração
@@ -136,8 +141,8 @@ WORKER_COUNT                  quantidade de workers processando eventos em paral
 READ_HEADER_TIMEOUT_SECONDS   timeout para leitura dos headers HTTP
 SHUTDOWN_TIMEOUT_SECONDS      tempo máximo para encerramento gracioso do servidor HTTP
 LOG_FORMAT                    formato dos logs: json ou text
-MAX_RETRIES                  quantidade de novas tentativas após a primeira falha
-RETRY_BACKOFF_SECONDS        base em segundos para o backoff entre tentativas
+MAX_RETRIES                   quantidade de novas tentativas após a primeira falha
+RETRY_BACKOFF_SECONDS         base em segundos para o backoff entre tentativas
 ```
 
 Exemplo no PowerShell:
@@ -150,9 +155,7 @@ go run .
 
 O arquivo `.env.example` documenta os valores esperados, mas a aplicação não carrega arquivos `.env` automaticamente.
 
-Para produção, use `LOG_FORMAT=json
-MAX_RETRIES=3
-RETRY_BACKOFF_SECONDS=1`. Para leitura local no terminal, `LOG_FORMAT=text` pode ser mais confortável.
+Para produção, use `LOG_FORMAT=json`. Para leitura local no terminal, `LOG_FORMAT=text` pode ser mais confortável.
 
 ## Concorrência
 
@@ -165,11 +168,10 @@ eventQueue chan Event
 Os workers são iniciados como goroutines:
 
 ```go
-go worker(workerID, eventQueue, workers)
+go worker(workerID, eventQueue, workers, config)
 ```
 
 A quantidade de workers e a capacidade da fila são configuradas por `WORKER_COUNT` e `QUEUE_SIZE`.
-
 
 ## Retry com backoff
 
@@ -197,6 +199,7 @@ O backoff cresce de forma linear por tentativa:
 ```
 
 Se todas as tentativas falharem, o evento é registrado como falha permanente nos logs. Nesta versão, ainda não existe dead-letter queue; esse é um próximo passo natural antes de produção real.
+
 ## Encerramento gracioso
 
 A aplicação escuta sinais de interrupção do sistema, como `Ctrl+C` no terminal ou `SIGTERM` em ambientes de orquestração.
@@ -214,6 +217,7 @@ Isso evita encerrar o processo de forma abrupta enquanto eventos ainda estão em
 ## Requisitos
 
 - Go 1.27+
+- Docker, opcional para execução containerizada
 
 ## Execução local
 
@@ -234,6 +238,38 @@ http://localhost:8080
 ```
 
 Para encerrar localmente, pressione `Ctrl+C` no terminal em que o serviço está rodando.
+
+## Docker
+
+Build da imagem:
+
+```powershell
+docker build -t go-webhook-processor:local .
+```
+
+Executar o container:
+
+```powershell
+docker run --rm `
+  -p 8080:8080 `
+  -e PORT=8080 `
+  -e LOG_FORMAT=json `
+  --name go-webhook-processor `
+  go-webhook-processor:local
+```
+
+Executar com configuração customizada:
+
+```powershell
+docker run --rm `
+  -p 9090:9090 `
+  -e PORT=9090 `
+  -e WORKER_COUNT=5 `
+  -e QUEUE_SIZE=500 `
+  -e LOG_FORMAT=json `
+  --name go-webhook-processor `
+  go-webhook-processor:local
+```
 
 ## Testes
 
@@ -278,6 +314,7 @@ Invoke-RestMethod `
 ```
 
 Enviar múltiplos eventos ajuda a observar os workers processando em paralelo pelos logs da aplicação.
+
 Simular falha de processamento para observar retries:
 
 ```powershell
@@ -294,13 +331,15 @@ A aplicação registra logs estruturados no console para os principais eventos o
 
 ```text
 event queued
-worker processing event
-worker finished event
+event processing started
+event processing finished
+event processing failed; retrying
+event processing failed permanently
 worker stopped
 shutdown complete
 ```
 
-Os logs incluem campos como `event_id`, `event_type`, `worker_id`, `queue_length`, `queue_capacity` e `error`, facilitando busca e análise em ferramentas de observabilidade.
+Os logs incluem campos como `event_id`, `event_type`, `worker_id`, `queue_length`, `queue_capacity`, `attempt`, `backoff` e `error`, facilitando busca e análise em ferramentas de observabilidade.
 
 O endpoint `/health` também expõe o tamanho atual da fila por meio dos campos `queueLength` e `queueCapacity`.
 
@@ -311,12 +350,5 @@ Esta versão ainda usa fila em memória. Isso significa que eventos pendentes po
 Antes de uso real em produção, os próximos passos recomendados são:
 
 - persistir eventos em banco ou fila externa
-- adicionar logs estruturados
+- adicionar dead-letter queue para eventos com falha permanente
 - adicionar métricas
-- adicionar retry com backoff
-- adicionar Dockerfile
-
-
-
-
-

@@ -1,0 +1,10 @@
+.git
+.gitignore
+*.exe
+Dockerfile
+README.md
+docs/
+requests.http
+.env
+.env.*
+!.env.example
