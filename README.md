@@ -84,6 +84,32 @@ Exemplo de resposta:
   "queueCapacity": 100
 }
 ```
+
+### GET /dead-letters
+
+Retorna os eventos que falharam permanentemente após esgotar as tentativas de retry.
+
+Exemplo de resposta:
+
+```json
+{
+  "count": 1,
+  "items": [
+    {
+      "event": {
+        "id": "evt-fail-001",
+        "type": "payment.created",
+        "payload": {
+          "simulateFailure": true
+        }
+      },
+      "error": "simulated processing failure",
+      "attempts": 4,
+      "failedAt": "2026-09-15T01:00:00Z"
+    }
+  ]
+}
+```
 ### POST /events
 
 Recebe um evento para processamento assíncrono.
@@ -126,6 +152,7 @@ logger.go      configuração de logs estruturados com slog
 app.go         estado da aplicação, fila interna e registro das rotas
 models.go      contratos de entrada e saída usados pela API
 metrics.go     contadores thread-safe e snapshot de métricas
+deadletter.go  armazenamento em memória dos eventos com falha permanente
 handlers.go    handlers HTTP, validação, métricas e respostas JSON
 worker.go      workers, retry e backoff do processamento assíncrono
 main_test.go   testes automatizados dos handlers e configurações
@@ -149,6 +176,7 @@ SHUTDOWN_TIMEOUT_SECONDS=10
 LOG_FORMAT=json
 MAX_RETRIES=3
 RETRY_BACKOFF_SECONDS=1
+DEAD_LETTER_CAPACITY=100
 ```
 
 Descrição das variáveis:
@@ -162,6 +190,7 @@ SHUTDOWN_TIMEOUT_SECONDS      tempo máximo para encerramento gracioso do servid
 LOG_FORMAT                    formato dos logs: json ou text
 MAX_RETRIES                   quantidade de novas tentativas após a primeira falha
 RETRY_BACKOFF_SECONDS         base em segundos para o backoff entre tentativas
+DEAD_LETTER_CAPACITY          quantidade máxima de eventos mantidos na dead-letter queue
 ```
 
 Exemplo no PowerShell:
@@ -201,6 +230,7 @@ Com os valores padrão:
 ```text
 MAX_RETRIES=3
 RETRY_BACKOFF_SECONDS=1
+DEAD_LETTER_CAPACITY=100
 ```
 
 Um evento pode ter até 4 tentativas no total:
@@ -219,6 +249,21 @@ O backoff cresce de forma linear por tentativa:
 
 Se todas as tentativas falharem, o evento é registrado como falha permanente nos logs. Nesta versão, ainda não existe dead-letter queue; esse é um próximo passo natural antes de produção real.
 
+
+## Dead-letter queue
+
+Quando um evento falha permanentemente após todos os retries, ele é armazenado em uma dead-letter queue em memória.
+
+Essa fila permite investigar falhas sem depender apenas dos logs. Cada item registra:
+
+- evento original
+- mensagem de erro
+- quantidade de tentativas
+- data/hora da falha
+
+A capacidade é controlada por `DEAD_LETTER_CAPACITY`. Quando a capacidade é atingida, o item mais antigo é descartado para abrir espaço para o novo.
+
+Nesta versão, a dead-letter queue ainda é em memória. Em produção real, o próximo passo seria persistir esses eventos em banco, fila externa ou storage dedicado.
 ## Encerramento gracioso
 
 A aplicação escuta sinais de interrupção do sistema, como `Ctrl+C` no terminal ou `SIGTERM` em ambientes de orquestração.
@@ -371,4 +416,5 @@ Antes de uso real em produção, os próximos passos recomendados são:
 - persistir eventos em banco ou fila externa
 - adicionar dead-letter queue para eventos com falha permanente
 - adicionar métricas
+
 

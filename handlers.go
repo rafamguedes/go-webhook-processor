@@ -24,6 +24,11 @@ func (app App) metricsHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+func (app App) deadLettersHandler(w http.ResponseWriter, r *http.Request) {
+	response := app.deadLetters.Snapshot()
+	writeJSON(w, http.StatusOK, response)
+}
+
 func (app App) createEventHandler(w http.ResponseWriter, r *http.Request) {
 	var event Event
 

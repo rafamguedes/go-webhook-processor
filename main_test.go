@@ -17,6 +17,7 @@ func TestLoadConfigUsesDefaults(t *testing.T) {
 	t.Setenv("LOG_FORMAT", "")
 	t.Setenv("MAX_RETRIES", "")
 	t.Setenv("RETRY_BACKOFF_SECONDS", "")
+	t.Setenv("DEAD_LETTER_CAPACITY", "")
 
 	config, err := LoadConfig()
 	if err != nil {
@@ -46,6 +47,10 @@ func TestLoadConfigUsesDefaults(t *testing.T) {
 	if config.RetryBackoffSeconds != 1 {
 		t.Fatalf("expected default retry backoff 1, got %d", config.RetryBackoffSeconds)
 	}
+
+	if config.DeadLetterCapacity != 100 {
+		t.Fatalf("expected default dead letter capacity 100, got %d", config.DeadLetterCapacity)
+	}
 }
 
 func TestLoadConfigReadsEnvironmentVariables(t *testing.T) {
@@ -57,6 +62,7 @@ func TestLoadConfigReadsEnvironmentVariables(t *testing.T) {
 	t.Setenv("LOG_FORMAT", "text")
 	t.Setenv("MAX_RETRIES", "5")
 	t.Setenv("RETRY_BACKOFF_SECONDS", "2")
+	t.Setenv("DEAD_LETTER_CAPACITY", "20")
 
 	config, err := LoadConfig()
 	if err != nil {
@@ -86,6 +92,10 @@ func TestLoadConfigReadsEnvironmentVariables(t *testing.T) {
 	if config.RetryBackoffSeconds != 2 {
 		t.Fatalf("expected retry backoff 2, got %d", config.RetryBackoffSeconds)
 	}
+
+	if config.DeadLetterCapacity != 20 {
+		t.Fatalf("expected dead letter capacity 20, got %d", config.DeadLetterCapacity)
+	}
 }
 
 func TestLoadConfigRejectsInvalidQueueSize(t *testing.T) {
@@ -112,6 +122,15 @@ func TestLoadConfigRejectsNegativeMaxRetries(t *testing.T) {
 	_, err := LoadConfig()
 	if err == nil {
 		t.Fatal("expected config to reject negative max retries")
+	}
+}
+
+func TestLoadConfigRejectsInvalidDeadLetterCapacity(t *testing.T) {
+	t.Setenv("DEAD_LETTER_CAPACITY", "0")
+
+	_, err := LoadConfig()
+	if err == nil {
+		t.Fatal("expected config to reject invalid dead letter capacity")
 	}
 }
 
@@ -177,6 +196,34 @@ func TestMetricsHandler(t *testing.T) {
 		t.Fatalf("expected queue capacity %d, got %d", app.config.QueueSize, body.QueueCapacity)
 	}
 }
+
+func TestDeadLettersHandler(t *testing.T) {
+	app := newTestApp()
+	app.deadLetters.Add(testEvent(), errForTest(), 4)
+
+	request := httptest.NewRequest(http.MethodGet, "/dead-letters", nil)
+	response := httptest.NewRecorder()
+
+	app.deadLettersHandler(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, response.Code)
+	}
+
+	var body DeadLetterResponse
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response body: %v", err)
+	}
+
+	if body.Count != 1 {
+		t.Fatalf("expected 1 dead letter, got %d", body.Count)
+	}
+
+	if body.Items[0].Event.ID != "evt-001" {
+		t.Fatalf("expected dead letter event id evt-001, got %s", body.Items[0].Event.ID)
+	}
+}
+
 func TestCreateEventHandlerQueuesValidEvent(t *testing.T) {
 	app := newTestApp()
 
@@ -236,5 +283,6 @@ func testConfig() Config {
 		LogFormat:                "json",
 		MaxRetries:               3,
 		RetryBackoffSeconds:      1,
+		DeadLetterCapacity:       100,
 	}
 }

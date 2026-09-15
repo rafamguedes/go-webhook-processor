@@ -16,6 +16,7 @@ type Config struct {
 	LogFormat                string
 	MaxRetries               int
 	RetryBackoffSeconds      int
+	DeadLetterCapacity       int
 }
 
 func LoadConfig() (Config, error) {
@@ -28,6 +29,7 @@ func LoadConfig() (Config, error) {
 		LogFormat:                getEnv("LOG_FORMAT", "json"),
 		MaxRetries:               getEnvAsInt("MAX_RETRIES", 3),
 		RetryBackoffSeconds:      getEnvAsInt("RETRY_BACKOFF_SECONDS", 1),
+		DeadLetterCapacity:       getEnvAsInt("DEAD_LETTER_CAPACITY", 100),
 	}
 
 	if config.QueueSize <= 0 {
@@ -56,6 +58,10 @@ func LoadConfig() (Config, error) {
 
 	if config.RetryBackoffSeconds <= 0 {
 		return Config{}, fmt.Errorf("RETRY_BACKOFF_SECONDS must be greater than zero")
+	}
+
+	if config.DeadLetterCapacity <= 0 {
+		return Config{}, fmt.Errorf("DEAD_LETTER_CAPACITY must be greater than zero")
 	}
 
 	return config, nil

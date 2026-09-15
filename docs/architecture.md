@@ -15,6 +15,7 @@ flowchart LR
     processor[Processamento do evento]
     health[GET /health]
     metrics[GET /metrics]
+    deadletters[GET /dead-letters]
 
     client -->|POST /events| api
     api --> handler
@@ -32,6 +33,10 @@ flowchart LR
     client -->|GET /metrics| api
     api --> metrics
     metrics --> metricsResponse[eventsQueued, eventsProcessed, retries, failures]
+
+    client -->|GET /dead-letters| api
+    api --> deadletters
+    deadletters --> deadLetterResponse[evento, erro, tentativas, data da falha]
 ```
 
 ## Fluxo de configuração
@@ -82,10 +87,11 @@ sequenceDiagram
 4. A API responde `202 Accepted` rapidamente.
 5. Os workers, rodando em goroutines, consomem a fila e processam os eventos em paralelo.
 6. Se o processamento falhar, o worker aplica retry com backoff antes de registrar falha permanente.
-7. A aplicação atualiza métricas em memória para eventos enfileirados, rejeitados, processados, retentados e com falha permanente.
-8. A aplicação registra logs estruturados com campos como `event_id`, `event_type` e `worker_id`.
-9. O endpoint `GET /health` mostra o estado básico da aplicação e da fila.
-10. Quando a aplicação recebe `Ctrl+C` ou `SIGTERM`, ela executa shutdown gracioso.
+7. Eventos com falha permanente entram na dead-letter queue em memória para investigação.
+8. A aplicação atualiza métricas em memória para eventos enfileirados, rejeitados, processados, retentados e com falha permanente.
+9. A aplicação registra logs estruturados com campos como `event_id`, `event_type` e `worker_id`.
+10. O endpoint `GET /health` mostra o estado básico da aplicação e da fila.
+11. Quando a aplicação recebe `Ctrl+C` ou `SIGTERM`, ela executa shutdown gracioso.
 
 ## Componentes atuais
 
@@ -94,6 +100,7 @@ Cliente externo -> HTTP server -> handler -> validação -> fila interna -> work
 ```
 
 A fila ainda é em memória. Em uma evolução futura, ela pode ser substituída ou complementada por uma fila externa, como RabbitMQ, Kafka, SQS ou Redis Streams.
+
 
 
 

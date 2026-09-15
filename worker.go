@@ -9,24 +9,24 @@ import (
 
 type eventProcessor func(workerID int, event Event) error
 
-func startWorkers(count int, eventQueue <-chan Event, workers *sync.WaitGroup, config Config, metrics *Metrics) {
+func startWorkers(count int, eventQueue <-chan Event, workers *sync.WaitGroup, config Config, metrics *Metrics, deadLetters *DeadLetterStore) {
 	for workerID := 1; workerID <= count; workerID++ {
 		workers.Add(1)
-		go worker(workerID, eventQueue, workers, config, metrics)
+		go worker(workerID, eventQueue, workers, config, metrics, deadLetters)
 	}
 }
 
-func worker(workerID int, eventQueue <-chan Event, workers *sync.WaitGroup, config Config, metrics *Metrics) {
+func worker(workerID int, eventQueue <-chan Event, workers *sync.WaitGroup, config Config, metrics *Metrics, deadLetters *DeadLetterStore) {
 	defer workers.Done()
 
 	for event := range eventQueue {
-		processEventWithRetry(workerID, event, config, processEvent, time.Sleep, metrics)
+		processEventWithRetry(workerID, event, config, processEvent, time.Sleep, metrics, deadLetters)
 	}
 
 	slog.Info("worker stopped", "worker_id", workerID)
 }
 
-func processEventWithRetry(workerID int, event Event, config Config, processor eventProcessor, sleep func(time.Duration), metrics *Metrics) bool {
+func processEventWithRetry(workerID int, event Event, config Config, processor eventProcessor, sleep func(time.Duration), metrics *Metrics, deadLetters *DeadLetterStore) bool {
 	maxAttempts := config.MaxRetries + 1
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
@@ -39,6 +39,7 @@ func processEventWithRetry(workerID int, event Event, config Config, processor e
 
 		if attempt == maxAttempts {
 			metrics.IncEventsFailedPermanent()
+			deadLetters.Add(event, err, attempt)
 			slog.Error("event processing failed permanently", "worker_id", workerID, "event_id", event.ID, "event_type", event.Type, "attempt", attempt, "max_attempts", maxAttempts, "error", err)
 			return false
 		}

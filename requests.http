@@ -6,6 +6,9 @@ GET {{baseUrl}}/health
 ### Métricas operacionais
 GET {{baseUrl}}/metrics
 
+### Dead letters
+GET {{baseUrl}}/dead-letters
+
 ### Enviar evento válido
 POST {{baseUrl}}/events
 Content-Type: application/json
@@ -76,4 +79,5 @@ Content-Type: application/json
   "payload": {
     "amount": 100
   }
+
 

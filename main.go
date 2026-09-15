@@ -23,7 +23,7 @@ func main() {
 	app := NewApp(config)
 
 	var workers sync.WaitGroup
-	startWorkers(config.WorkerCount, app.eventQueue, &workers, config, app.metrics)
+	startWorkers(config.WorkerCount, app.eventQueue, &workers, config, app.metrics, app.deadLetters)
 
 	server := &http.Server{
 		Addr:              config.ServerAddress(),
