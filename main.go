@@ -8,24 +8,28 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
-	"time"
 )
 
 func main() {
-	app := NewApp()
+	config, err := LoadConfig()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	app := NewApp(config)
 
 	var workers sync.WaitGroup
-	startWorkers(workerCount, app.eventQueue, &workers)
+	startWorkers(config.WorkerCount, app.eventQueue, &workers)
 
 	server := &http.Server{
-		Addr:              ":8080",
+		Addr:              config.ServerAddress(),
 		Handler:           app.routes(),
-		ReadHeaderTimeout: 5 * time.Second,
+		ReadHeaderTimeout: config.ReadHeaderTimeout(),
 	}
 
 	serverErrors := make(chan error, 1)
 	go func() {
-		log.Println("server listening on http://localhost:8080")
+		log.Printf("server listening on http://localhost%s", config.ServerAddress())
 		serverErrors <- server.ListenAndServe()
 	}()
 
@@ -41,7 +45,7 @@ func main() {
 		log.Println("shutdown signal received")
 	}
 
-	shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownContext, cancel := context.WithTimeout(context.Background(), config.ShutdownTimeout())
 	defer cancel()
 
 	if err := server.Shutdown(shutdownContext); err != nil {

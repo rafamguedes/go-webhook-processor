@@ -2,18 +2,15 @@ package main
 
 import "net/http"
 
-const (
-	queueSize   = 100
-	workerCount = 3
-)
-
 type App struct {
+	config     Config
 	eventQueue chan Event
 }
 
-func NewApp() App {
+func NewApp(config Config) App {
 	return App{
-		eventQueue: make(chan Event, queueSize),
+		config:     config,
+		eventQueue: make(chan Event, config.QueueSize),
 	}
 }
 

@@ -83,12 +83,46 @@ Possíveis respostas:
 
 ```text
 main.go       bootstrap, servidor HTTP e encerramento gracioso
+config.go     leitura e validação de configurações por ambiente
 app.go        estado da aplicação, fila interna e registro das rotas
 models.go     contratos de entrada e saída usados pela API
 handlers.go   handlers HTTP, validação e respostas JSON
 worker.go     workers responsáveis pelo processamento assíncrono
-main_test.go  testes automatizados dos handlers
+main_test.go  testes automatizados dos handlers e configurações
+.env.example  exemplo de variáveis de ambiente
 ```
+
+## Configuração
+
+A aplicação pode ser configurada por variáveis de ambiente. Quando uma variável não é informada, o serviço usa um valor padrão seguro para execução local.
+
+```text
+PORT=8080
+QUEUE_SIZE=100
+WORKER_COUNT=3
+READ_HEADER_TIMEOUT_SECONDS=5
+SHUTDOWN_TIMEOUT_SECONDS=10
+```
+
+Descrição das variáveis:
+
+```text
+PORT                          porta HTTP usada pelo servidor
+QUEUE_SIZE                    quantidade máxima de eventos aguardando na fila interna
+WORKER_COUNT                  quantidade de workers processando eventos em paralelo
+READ_HEADER_TIMEOUT_SECONDS   timeout para leitura dos headers HTTP
+SHUTDOWN_TIMEOUT_SECONDS      tempo máximo para encerramento gracioso do servidor HTTP
+```
+
+Exemplo no PowerShell:
+
+```powershell
+$env:PORT = "9090"
+$env:WORKER_COUNT = "5"
+go run .
+```
+
+O arquivo `.env.example` documenta os valores esperados, mas a aplicação não carrega arquivos `.env` automaticamente.
 
 ## Concorrência
 
@@ -104,17 +138,7 @@ Os workers são iniciados como goroutines:
 go worker(workerID, eventQueue, workers)
 ```
 
-Com a configuração atual, até 3 eventos podem ser processados em paralelo:
-
-```go
-const workerCount = 3
-```
-
-A fila possui capacidade para 100 eventos aguardando processamento:
-
-```go
-const queueSize = 100
-```
+A quantidade de workers e a capacidade da fila são configuradas por `WORKER_COUNT` e `QUEUE_SIZE`.
 
 ## Encerramento gracioso
 
@@ -123,7 +147,7 @@ A aplicação escuta sinais de interrupção do sistema, como `Ctrl+C` no termin
 Ao receber o sinal, o serviço:
 
 - para de aceitar novas requisições HTTP
-- aguarda o servidor HTTP encerrar com timeout de 10 segundos
+- aguarda o servidor HTTP encerrar dentro do timeout configurado
 - fecha a fila interna de eventos
 - espera os workers terminarem os eventos já retirados da fila
 - registra `shutdown complete` ao final do processo
@@ -146,7 +170,7 @@ Se o Go ainda não estiver no PATH da sessão atual:
 & "C:\Program Files\Go\bin\go.exe" run .
 ```
 
-A aplicação sobe em:
+A aplicação sobe por padrão em:
 
 ```text
 http://localhost:8080
@@ -218,6 +242,4 @@ Antes de uso real em produção, os próximos passos recomendados são:
 - adicionar logs estruturados
 - adicionar métricas
 - adicionar retry com backoff
-- adicionar configuração por variáveis de ambiente
 - adicionar Dockerfile
-
