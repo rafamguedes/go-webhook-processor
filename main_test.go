@@ -154,7 +154,7 @@ func TestLoadConfigRejectsInvalidEventDedupCapacity(t *testing.T) {
 }
 
 func TestHealthHandler(t *testing.T) {
-	app := newTestApp()
+	app := newTestApp(t)
 
 	request := httptest.NewRequest(http.MethodGet, "/health", nil)
 	response := httptest.NewRecorder()
@@ -180,7 +180,7 @@ func TestHealthHandler(t *testing.T) {
 }
 
 func TestMetricsHandler(t *testing.T) {
-	app := newTestApp()
+	app := newTestApp(t)
 	app.metrics.IncEventsQueued()
 	app.metrics.IncEventsProcessed()
 	app.metrics.IncEventRetries()
@@ -222,7 +222,7 @@ func TestMetricsHandler(t *testing.T) {
 }
 
 func TestDeadLettersHandler(t *testing.T) {
-	app := newTestApp()
+	app := newTestApp(t)
 	app.deadLetters.Add(testEvent(), errForTest(), 4)
 
 	request := httptest.NewRequest(http.MethodGet, "/dead-letters", nil)
@@ -249,7 +249,7 @@ func TestDeadLettersHandler(t *testing.T) {
 }
 
 func TestCreateEventHandlerQueuesValidEvent(t *testing.T) {
-	app := newTestApp()
+	app := newTestApp(t)
 
 	body := `{"id":"evt-001","type":"payment.created","payload":{"amount":100}}`
 	request := httptest.NewRequest(http.MethodPost, "/events", strings.NewReader(body))
@@ -276,7 +276,7 @@ func TestCreateEventHandlerQueuesValidEvent(t *testing.T) {
 }
 
 func TestCreateEventHandlerRejectsDuplicateEventID(t *testing.T) {
-	app := newTestApp()
+	app := newTestApp(t)
 	body := `{"id":"evt-001","type":"payment.created","payload":{"amount":100}}`
 
 	firstRequest := httptest.NewRequest(http.MethodPost, "/events", strings.NewReader(body))
@@ -298,7 +298,7 @@ func TestCreateEventHandlerRejectsDuplicateEventID(t *testing.T) {
 }
 
 func TestCreateEventHandlerRejectsMissingID(t *testing.T) {
-	app := newTestApp()
+	app := newTestApp(t)
 
 	body := `{"type":"payment.created","payload":{"amount":100}}`
 	request := httptest.NewRequest(http.MethodPost, "/events", strings.NewReader(body))
@@ -315,8 +315,10 @@ func TestCreateEventHandlerRejectsMissingID(t *testing.T) {
 	}
 }
 
-func newTestApp() App {
-	return NewApp(testConfig())
+func newTestApp(t *testing.T) App {
+	t.Helper()
+
+	return NewApp(testConfig(), newTestEventStore(t))
 }
 
 func testConfig() Config {
@@ -331,5 +333,6 @@ func testConfig() Config {
 		RetryBackoffSeconds:      1,
 		DeadLetterCapacity:       100,
 		EventDedupCapacity:       1000,
+		DatabasePath:             "./events-test.db",
 	}
 }

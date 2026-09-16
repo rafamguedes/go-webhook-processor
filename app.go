@@ -8,15 +8,17 @@ type App struct {
 	metrics      *Metrics
 	deadLetters  *DeadLetterStore
 	deduplicator *EventDeduplicator
+	eventStore   *EventStore
 }
 
-func NewApp(config Config) App {
+func NewApp(config Config, eventStore *EventStore) App {
 	return App{
 		config:       config,
 		eventQueue:   make(chan Event, config.QueueSize),
 		metrics:      NewMetrics(),
 		deadLetters:  NewDeadLetterStore(config.DeadLetterCapacity),
 		deduplicator: NewEventDeduplicator(config.EventDedupCapacity),
+		eventStore:   eventStore,
 	}
 }
 

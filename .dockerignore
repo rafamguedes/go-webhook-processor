@@ -1,6 +1,8 @@
 .git
 .gitignore
 *.exe
+*.db
+*.db-*
 Dockerfile
 README.md
 docs/

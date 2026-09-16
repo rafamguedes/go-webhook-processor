@@ -2,11 +2,11 @@
 
 Serviço HTTP em Go para recebimento e processamento assíncrono de eventos via webhook.
 
-A aplicação foi desenhada para um cenário comum de backend: receber eventos de sistemas externos, validar o payload, responder rapidamente ao cliente e processar o trabalho em segundo plano usando uma fila interna com workers concorrentes.
+A aplicação foi desenhada para um cenário comum de backend: receber eventos de sistemas externos, validar o payload, persistir o evento, responder rapidamente ao cliente e processar o trabalho em segundo plano usando uma fila interna com workers concorrentes.
 
 ## Objetivo
 
-Este serviço resolve o problema de não bloquear requisições HTTP enquanto uma tarefa potencialmente demorada é executada. O endpoint `POST /events` apenas valida e enfileira o evento. O processamento ocorre de forma assíncrona por workers em goroutines.
+Este serviço evita bloquear requisições HTTP enquanto tarefas potencialmente demoradas são executadas. O endpoint `POST /events` valida, deduplica, persiste e enfileira o evento. O processamento ocorre de forma assíncrona por workers em goroutines.
 
 Esse padrão é útil para:
 
@@ -23,30 +23,13 @@ Esse padrão é útil para:
 Cliente externo
   -> POST /events
     -> validação do JSON
-      -> envio para a fila interna
-        -> resposta HTTP 202 Accepted
-          -> workers processam eventos em background com retry/backoff
+      -> deduplicação por event.id
+        -> persistência em SQLite como queued
+          -> envio para a fila interna
+            -> resposta HTTP 202 Accepted
+              -> workers processam eventos em background com retry/backoff
+                -> atualização do status para processed ou failed
 ```
-
-## Diagrama de alto nível
-
-```mermaid
-flowchart LR
-    client[Cliente externo] -->|POST /events| api[Servidor HTTP Go]
-    api --> handler[Handler de eventos]
-    handler --> validation[Validação do JSON]
-    validation -->|inválido| badRequest[400 Bad Request]
-    validation -->|válido| queue[Fila interna chan Event]
-    queue --> accepted[202 Accepted]
-    queue --> workers[Workers em goroutines]
-    workers --> retry[Retry com backoff]
-    retry --> processor[Processamento em background]
-
-    client -->|GET /health| health[Health check]
-    health --> status[Status e métricas da fila]
-```
-
-Veja também a documentação detalhada em [`docs/architecture.md`](docs/architecture.md).
 
 ## Endpoints
 
@@ -54,24 +37,9 @@ Veja também a documentação detalhada em [`docs/architecture.md`](docs/archite
 
 Retorna o status da aplicação e informações básicas da fila interna.
 
-Exemplo de resposta:
-
-```json
-{
-  "status": "ok",
-  "time": "2026-09-14T22:30:00-03:00",
-  "date": "2026-09-14",
-  "queueLength": 0,
-  "queueCapacity": 100
-}
-```
-
-
 ### GET /metrics
 
 Retorna um snapshot dos principais contadores operacionais da aplicação.
-
-Exemplo de resposta:
 
 ```json
 {
@@ -88,34 +56,11 @@ Exemplo de resposta:
 
 ### GET /dead-letters
 
-Retorna os eventos que falharam permanentemente após esgotar as tentativas de retry.
+Retorna os eventos que falharam permanentemente após esgotar as tentativas de retry. Este endpoint mostra apenas falhas permanentes mantidas em memória.
 
-Exemplo de resposta:
-
-```json
-{
-  "count": 1,
-  "items": [
-    {
-      "event": {
-        "id": "evt-fail-001",
-        "type": "payment.created",
-        "payload": {
-          "simulateFailure": true
-        }
-      },
-      "error": "simulated processing failure",
-      "attempts": 4,
-      "failedAt": "2026-09-15T01:00:00Z"
-    }
-  ]
-}
-```
 ### POST /events
 
 Recebe um evento para processamento assíncrono.
-
-Payload esperado:
 
 ```json
 {
@@ -127,48 +72,39 @@ Payload esperado:
 }
 ```
 
-Resposta de sucesso:
-
-```json
-{
-  "accepted": true,
-  "eventId": "evt-001"
-}
-```
-
 Possíveis respostas:
 
 ```text
-202 Accepted            evento validado e enfileirado
+202 Accepted            evento validado, persistido e enfileirado
 400 Bad Request         JSON inválido ou campos obrigatórios ausentes
+409 Conflict            event.id duplicado ou já persistido
 503 Service Unavailable fila interna cheia
-409 Conflict            event.id duplicado
 ```
 
 ## Arquitetura
 
 ```text
-main.go        bootstrap, servidor HTTP e encerramento gracioso
-config.go      leitura e validação de configurações por ambiente
-logger.go      configuração de logs estruturados com slog
-app.go         estado da aplicação, fila interna e registro das rotas
-models.go      contratos de entrada e saída usados pela API
-metrics.go     contadores thread-safe e snapshot de métricas
-dedup.go       controle de idempotência em memória por event.id
-deadletter.go  armazenamento em memória dos eventos com falha permanente
-handlers.go    handlers HTTP, validação, métricas e respostas JSON
-worker.go      workers, retry e backoff do processamento assíncrono
-main_test.go   testes automatizados dos handlers e configurações
-worker_test.go testes automatizados do retry/backoff
-.env.example   exemplo de variáveis de ambiente
-Dockerfile     build de imagem containerizada
-.dockerignore  exclusões do contexto de build Docker
-requests.http  chamadas HTTP para testar pela IDE
+main.go             bootstrap, servidor HTTP e encerramento gracioso
+config.go           leitura e validação de configurações por ambiente
+logger.go           configuração de logs estruturados com slog
+event_store.go      persistência SQLite dos eventos e status
+app.go              estado da aplicação, fila interna e registro das rotas
+models.go           contratos de entrada e saída usados pela API
+metrics.go          contadores thread-safe e snapshot de métricas
+dedup.go            controle de idempotência em memória por event.id
+deadletter.go       armazenamento em memória dos eventos com falha permanente
+handlers.go         handlers HTTP, validação, métricas e respostas JSON
+worker.go           workers, retry e backoff do processamento assíncrono
+*_test.go           testes automatizados
+.env.example        exemplo de variáveis de ambiente
+Dockerfile          build de imagem containerizada
+.dockerignore       exclusões do contexto de build Docker
+requests.http       chamadas HTTP para testar pela IDE
 ```
 
-## Configuração
+Veja também a documentação detalhada em [`docs/architecture.md`](docs/architecture.md).
 
-A aplicação pode ser configurada por variáveis de ambiente. Quando uma variável não é informada, o serviço usa um valor padrão seguro para execução local.
+## Configuração
 
 ```text
 PORT=8080
@@ -181,6 +117,7 @@ MAX_RETRIES=3
 RETRY_BACKOFF_SECONDS=1
 DEAD_LETTER_CAPACITY=100
 EVENT_DEDUP_CAPACITY=1000
+DATABASE_PATH=./events.db
 ```
 
 Descrição das variáveis:
@@ -196,19 +133,29 @@ MAX_RETRIES                   quantidade de novas tentativas após a primeira fa
 RETRY_BACKOFF_SECONDS         base em segundos para o backoff entre tentativas
 DEAD_LETTER_CAPACITY          quantidade máxima de eventos mantidos na dead-letter queue
 EVENT_DEDUP_CAPACITY          quantidade máxima de event.id mantidos para deduplicação
+DATABASE_PATH                 caminho do arquivo SQLite usado para persistir eventos
 ```
 
-Exemplo no PowerShell:
+## Persistência
 
-```powershell
-$env:PORT = "9090"
-$env:WORKER_COUNT = "5"
-go run .
+A aplicação usa SQLite para persistir o histórico operacional dos eventos recebidos.
+
+Cada evento aceito é salvo inicialmente com status:
+
+```text
+queued
 ```
 
-O arquivo `.env.example` documenta os valores esperados, mas a aplicação não carrega arquivos `.env` automaticamente.
+Depois, o worker atualiza o status para:
 
-Para produção, use `LOG_FORMAT=json`. Para leitura local no terminal, `LOG_FORMAT=text` pode ser mais confortável.
+```text
+processed
+failed
+```
+
+Também são registrados `attempts`, `error`, `created_at` e `updated_at`.
+
+Por segurança, esta versão não expõe um endpoint público para listar todos os eventos persistidos. 
 
 
 ## Idempotência
@@ -225,20 +172,9 @@ Isso evita processamento duplicado em cenários comuns de webhook, nos quais o s
 
 A memória de deduplicação é limitada por `EVENT_DEDUP_CAPACITY`. Quando a capacidade é atingida, o ID mais antigo é descartado para abrir espaço para novos IDs.
 
-Nesta versão, a deduplicação ainda é em memória. Em produção real, o próximo passo seria persistir as chaves de idempotência em banco, cache distribuído ou storage transacional.
 ## Concorrência
 
-A aplicação usa uma fila interna baseada em `chan Event`:
-
-```go
-eventQueue chan Event
-```
-
-Os workers são iniciados como goroutines:
-
-```go
-go worker(workerID, eventQueue, workers, config)
-```
+A aplicação usa uma fila interna baseada em `chan Event` e workers iniciados como goroutines.
 
 A quantidade de workers e a capacidade da fila são configuradas por `WORKER_COUNT` e `QUEUE_SIZE`.
 
@@ -246,16 +182,7 @@ A quantidade de workers e a capacidade da fila são configuradas por `WORKER_COU
 
 Quando o processamento de um evento falha, o worker tenta processá-lo novamente antes de desistir definitivamente.
 
-Com os valores padrão:
-
-```text
-MAX_RETRIES=3
-RETRY_BACKOFF_SECONDS=1
-DEAD_LETTER_CAPACITY=100
-EVENT_DEDUP_CAPACITY=1000
-```
-
-Um evento pode ter até 4 tentativas no total:
+Com os valores padrão, um evento pode ter até 4 tentativas no total:
 
 ```text
 1 tentativa inicial + 3 retries
@@ -269,23 +196,8 @@ O backoff cresce de forma linear por tentativa:
 3ª falha -> aguarda 3 segundos
 ```
 
-Se todas as tentativas falharem, o evento é registrado como falha permanente nos logs. Nesta versão, ainda não existe dead-letter queue; esse é um próximo passo natural antes de produção real.
+Se todas as tentativas falharem, o evento é marcado como `failed`, registrado nos logs, contabilizado nas métricas e adicionado à dead-letter queue em memória.
 
-
-## Dead-letter queue
-
-Quando um evento falha permanentemente após todos os retries, ele é armazenado em uma dead-letter queue em memória.
-
-Essa fila permite investigar falhas sem depender apenas dos logs. Cada item registra:
-
-- evento original
-- mensagem de erro
-- quantidade de tentativas
-- data/hora da falha
-
-A capacidade é controlada por `DEAD_LETTER_CAPACITY`. Quando a capacidade é atingida, o item mais antigo é descartado para abrir espaço para o novo.
-
-Nesta versão, a dead-letter queue ainda é em memória. Em produção real, o próximo passo seria persistir esses eventos em banco, fila externa ou storage dedicado.
 ## Encerramento gracioso
 
 A aplicação escuta sinais de interrupção do sistema, como `Ctrl+C` no terminal ou `SIGTERM` em ambientes de orquestração.
@@ -298,23 +210,10 @@ Ao receber o sinal, o serviço:
 - espera os workers terminarem os eventos já retirados da fila
 - registra `shutdown complete` ao final do processo
 
-Isso evita encerrar o processo de forma abrupta enquanto eventos ainda estão em processamento.
-
-## Requisitos
-
-- Go 1.27+
-- Docker, opcional para execução containerizada
-
 ## Execução local
 
 ```powershell
 go run .
-```
-
-Se o Go ainda não estiver no PATH da sessão atual:
-
-```powershell
-& "C:\Program Files\Go\bin\go.exe" run .
 ```
 
 A aplicação sobe por padrão em:
@@ -322,8 +221,6 @@ A aplicação sobe por padrão em:
 ```text
 http://localhost:8080
 ```
-
-Para encerrar localmente, pressione `Ctrl+C` no terminal em que o serviço está rodando.
 
 ## Docker
 
@@ -333,28 +230,22 @@ Build da imagem:
 docker build -t go-webhook-processor:local .
 ```
 
-Executar o container:
+Executar o container com volume para persistir o SQLite:
 
 ```powershell
 docker run --rm `
   -p 8080:8080 `
   -e PORT=8080 `
   -e LOG_FORMAT=json `
+  -v go-webhook-data:/data `
   --name go-webhook-processor `
   go-webhook-processor:local
 ```
 
-Executar com configuração customizada:
+No container, o banco usa por padrão:
 
-```powershell
-docker run --rm `
-  -p 9090:9090 `
-  -e PORT=9090 `
-  -e WORKER_COUNT=5 `
-  -e QUEUE_SIZE=500 `
-  -e LOG_FORMAT=json `
-  --name go-webhook-processor `
-  go-webhook-processor:local
+```text
+/data/events.db
 ```
 
 ## Testes
@@ -363,81 +254,24 @@ docker run --rm `
 go test ./...
 ```
 
-Se o Go ainda não estiver no PATH da sessão atual:
-
-```powershell
-& "C:\Program Files\Go\bin\go.exe" test ./...
-```
-
 ## Build
 
 ```powershell
 go build .
 ```
 
-O comando gera um binário executável do serviço.
-
 ## Testes pela IDE
 
 O arquivo [`requests.http`](requests.http) contém chamadas prontas para uso com a extensão REST Client do VS Code.
 
-## Testes manuais
-
-Health check:
-
-```powershell
-Invoke-RestMethod http://localhost:8080/health
-```
-
-Enviar evento:
-
-```powershell
-Invoke-RestMethod `
-  -Method Post `
-  -Uri http://localhost:8080/events `
-  -ContentType "application/json" `
-  -Body '{"id":"evt-001","type":"payment.created","payload":{"amount":100}}'
-```
-
-Enviar múltiplos eventos ajuda a observar os workers processando em paralelo pelos logs da aplicação.
-
-Simular falha de processamento para observar retries:
-
-```powershell
-Invoke-RestMethod `
-  -Method Post `
-  -Uri http://localhost:8080/events `
-  -ContentType "application/json" `
-  -Body '{"id":"evt-fail-001","type":"payment.created","payload":{"simulateFailure":true}}'
-```
-
 ## Observabilidade atual
 
-A aplicação registra logs estruturados no console para os principais eventos operacionais:
+A aplicação oferece:
 
-```text
-event queued
-event processing started
-event processing finished
-event processing failed; retrying
-event processing failed permanently
-worker stopped
-shutdown complete
-```
-
-Os logs incluem campos como `event_id`, `event_type`, `worker_id`, `queue_length`, `queue_capacity`, `attempt`, `backoff` e `error`, facilitando busca e análise em ferramentas de observabilidade.
-
-O endpoint `/health` expõe o estado básico da aplicação, e o endpoint `/metrics` expõe contadores como `eventsQueued`, `eventsRejected`, `eventsDuplicated`, `eventsProcessed`, `eventsFailedPermanent` e `eventRetries`.
-
-## Limitações atuais
-
-Esta versão ainda usa fila em memória. Isso significa que eventos pendentes podem ser perdidos se o processo cair de forma abrupta, por exemplo em um kill forçado, falha da máquina ou reinício inesperado.
-
-Antes de uso real em produção, os próximos passos recomendados são:
-
-- persistir eventos em banco ou fila externa
-- adicionar dead-letter queue para eventos com falha permanente
-- adicionar métricas
-
+- endpoint `/health`
+- endpoint `/metrics`
+- endpoint `/dead-letters`
+- logs estruturados com `slog`
+- status persistido em SQLite
 
 

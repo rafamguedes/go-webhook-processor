@@ -20,10 +20,17 @@ func main() {
 	}
 	setupLogger(config)
 
-	app := NewApp(config)
+	eventStore, err := OpenEventStore(config.DatabasePath)
+	if err != nil {
+		slog.Error("open event store failed", "error", err)
+		os.Exit(1)
+	}
+	defer eventStore.Close()
+
+	app := NewApp(config, eventStore)
 
 	var workers sync.WaitGroup
-	startWorkers(config.WorkerCount, app.eventQueue, &workers, config, app.metrics, app.deadLetters)
+	startWorkers(config.WorkerCount, app.eventQueue, &workers, config, app.metrics, app.deadLetters, app.eventStore)
 
 	server := &http.Server{
 		Addr:              config.ServerAddress(),

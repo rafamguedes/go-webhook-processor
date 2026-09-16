@@ -2,17 +2,22 @@ FROM golang:1.27.1-alpine AS build
 
 WORKDIR /src
 
-COPY go.mod ./
+COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /app/go-webhook-processor .
 
-FROM scratch
+FROM alpine:3.22
 
-COPY --from=build /app/go-webhook-processor /go-webhook-processor
+RUN addgroup -S app && adduser -S app -G app
+WORKDIR /app
+RUN mkdir -p /data && chown -R app:app /data /app
 
-USER 65532:65532
+COPY --from=build /app/go-webhook-processor /app/go-webhook-processor
+
+USER app
 EXPOSE 8080
+ENV DATABASE_PATH=/data/events.db
 
-ENTRYPOINT ["/go-webhook-processor"]
+ENTRYPOINT ["/app/go-webhook-processor"]

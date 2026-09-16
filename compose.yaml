@@ -1,0 +1,17 @@
+services:
+  webhook-processor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: go-webhook-processor:local
+    container_name: go-webhook-processor
+    environment:
+      PORT: "8080"
+      LOG_FORMAT: json
+      DATABASE_PATH: /data/events.db
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+

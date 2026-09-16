@@ -12,11 +12,16 @@ func TestProcessEventWithRetrySucceedsAfterFailure(t *testing.T) {
 	config.RetryBackoffSeconds = 1
 	metrics := NewMetrics()
 	deadLetters := NewDeadLetterStore(config.DeadLetterCapacity)
+	eventStore := newTestEventStore(t)
+	event := testEvent()
+	if err := eventStore.SaveQueued(t.Context(), event); err != nil {
+		t.Fatalf("failed to save queued event: %v", err)
+	}
 
 	attempts := 0
 	sleeps := 0
 
-	succeeded := processEventWithRetry(1, testEvent(), config, func(workerID int, event Event) error {
+	succeeded := processEventWithRetry(1, event, config, func(workerID int, event Event) error {
 		attempts++
 		if attempts == 1 {
 			return fmt.Errorf("temporary failure")
@@ -27,7 +32,7 @@ func TestProcessEventWithRetrySucceedsAfterFailure(t *testing.T) {
 		if duration != time.Second {
 			t.Fatalf("expected first backoff to be 1s, got %s", duration)
 		}
-	}, metrics, deadLetters)
+	}, metrics, deadLetters, eventStore)
 
 	if !succeeded {
 		t.Fatal("expected event processing to succeed")
@@ -62,16 +67,21 @@ func TestProcessEventWithRetryFailsPermanently(t *testing.T) {
 	config.RetryBackoffSeconds = 1
 	metrics := NewMetrics()
 	deadLetters := NewDeadLetterStore(config.DeadLetterCapacity)
+	eventStore := newTestEventStore(t)
+	event := testEvent()
+	if err := eventStore.SaveQueued(t.Context(), event); err != nil {
+		t.Fatalf("failed to save queued event: %v", err)
+	}
 
 	attempts := 0
 	sleeps := 0
 
-	succeeded := processEventWithRetry(1, testEvent(), config, func(workerID int, event Event) error {
+	succeeded := processEventWithRetry(1, event, config, func(workerID int, event Event) error {
 		attempts++
 		return errForTest()
 	}, func(duration time.Duration) {
 		sleeps++
-	}, metrics, deadLetters)
+	}, metrics, deadLetters, eventStore)
 
 	if succeeded {
 		t.Fatal("expected event processing to fail")

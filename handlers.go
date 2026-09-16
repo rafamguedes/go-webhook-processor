@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -61,12 +62,24 @@ func (app App) createEventHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := app.eventStore.SaveQueued(r.Context(), event); err != nil {
+		app.metrics.IncEventsRejected()
+		app.metrics.IncEventsDuplicated()
+		slog.Warn("event rejected", "reason", "event already persisted", "event_id", event.ID, "event_type", event.Type, "error", err)
+		writeError(w, http.StatusConflict, "event already exists")
+		return
+	}
+
 	select {
 	case app.eventQueue <- event:
 		app.metrics.IncEventsQueued()
 		slog.Info("event queued", "event_id", event.ID, "event_type", event.Type, "queue_length", len(app.eventQueue), "queue_capacity", cap(app.eventQueue))
 	default:
 		app.metrics.IncEventsRejected()
+		markErr := app.eventStore.MarkFailed(r.Context(), event.ID, 0, fmt.Errorf("event queue is full"))
+		if markErr != nil {
+			slog.Error("mark event failed after full queue", "event_id", event.ID, "error", markErr)
+		}
 		slog.Warn("event queue is full", "event_id", event.ID, "event_type", event.Type, "queue_capacity", cap(app.eventQueue))
 		writeError(w, http.StatusServiceUnavailable, "event queue is full")
 		return
