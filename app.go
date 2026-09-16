@@ -4,16 +4,16 @@ import "net/http"
 
 type App struct {
 	config      Config
-	eventQueue  chan Event
+	eventQueue  EventQueue
 	metrics     *Metrics
 	deadLetters *DeadLetterStore
 	eventStore  *EventStore
 }
 
-func NewApp(config Config, eventStore *EventStore) App {
+func NewApp(config Config, eventStore *EventStore, eventQueue EventQueue) App {
 	return App{
 		config:      config,
-		eventQueue:  make(chan Event, config.QueueSize),
+		eventQueue:  eventQueue,
 		metrics:     NewMetrics(),
 		deadLetters: NewDeadLetterStore(config.DeadLetterCapacity),
 		eventStore:  eventStore,

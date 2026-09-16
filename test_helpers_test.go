@@ -31,7 +31,8 @@ func newTestEventStoreWithPath(t *testing.T) (*EventStore, string) {
 func newTestApp(t *testing.T) App {
 	t.Helper()
 
-	return NewApp(testConfig(), newTestEventStore(t))
+	config := testConfig()
+	return NewApp(config, newTestEventStore(t), NewMemoryEventQueue(config.QueueSize))
 }
 
 func testConfig() Config {

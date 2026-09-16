@@ -10,35 +10,33 @@ import (
 
 type eventProcessor func(workerID int, event Event) error
 
-func recoverQueuedEvents(ctx context.Context, eventQueue chan<- Event, metrics *Metrics, eventStore *EventStore) (int, error) {
+func recoverQueuedEvents(ctx context.Context, eventQueue EventPublisher, metrics *Metrics, eventStore *EventStore) (int, error) {
 	events, err := eventStore.ListQueued(ctx)
 	if err != nil {
 		return 0, err
 	}
 
 	for index, event := range events {
-		select {
-		case eventQueue <- event:
-			metrics.IncEventsQueued()
-		case <-ctx.Done():
-			return index, fmt.Errorf("recover queued events: %w", ctx.Err())
+		if err := eventQueue.Publish(ctx, event); err != nil {
+			return index, fmt.Errorf("recover queued events: %w", err)
 		}
+		metrics.IncEventsQueued()
 	}
 
 	return len(events), nil
 }
 
-func startWorkers(count int, eventQueue <-chan Event, workers *sync.WaitGroup, config Config, metrics *Metrics, deadLetters *DeadLetterStore, eventStore *EventStore) {
+func startWorkers(count int, eventQueue EventConsumer, workers *sync.WaitGroup, config Config, metrics *Metrics, deadLetters *DeadLetterStore, eventStore *EventStore) {
 	for workerID := 1; workerID <= count; workerID++ {
 		workers.Add(1)
 		go worker(workerID, eventQueue, workers, config, metrics, deadLetters, eventStore)
 	}
 }
 
-func worker(workerID int, eventQueue <-chan Event, workers *sync.WaitGroup, config Config, metrics *Metrics, deadLetters *DeadLetterStore, eventStore *EventStore) {
+func worker(workerID int, eventQueue EventConsumer, workers *sync.WaitGroup, config Config, metrics *Metrics, deadLetters *DeadLetterStore, eventStore *EventStore) {
 	defer workers.Done()
 
-	for event := range eventQueue {
+	for event := range eventQueue.Events() {
 		processEventWithRetry(workerID, event, config, processEvent, time.Sleep, metrics, deadLetters, eventStore)
 	}
 

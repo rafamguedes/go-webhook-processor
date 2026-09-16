@@ -86,7 +86,8 @@ Possíveis respostas:
 main.go             bootstrap, servidor HTTP e encerramento gracioso
 config.go           leitura e validação de configurações por ambiente
 logger.go           configuração de logs estruturados com slog
-app.go              estado da aplicação, fila interna e registro das rotas
+app.go              estado da aplicação, dependências e registro das rotas
+queue.go            contrato EventQueue e implementação em memória
 models.go           contratos de entrada e saída usados pela API
 metrics.go          contadores thread-safe e snapshot de métricas
 event_store.go      persistência SQLite, estados e idempotência por event.id
@@ -172,9 +173,11 @@ Na inicialização, a aplicação consulta os eventos com status `queued` e os r
 
 ## Concorrência
 
-A aplicação usa uma fila interna baseada em `chan Event` e workers iniciados como goroutines.
+A aplicação depende do contrato `EventQueue`, não diretamente de um channel. Esse contrato combina interfaces menores: `EventPublisher`, usada para publicar, e `EventConsumer`, usada pelos workers para consumir. A implementação atual, `MemoryEventQueue`, encapsula um `chan Event`.
 
-A quantidade de workers e a capacidade da fila são configuradas por `WORKER_COUNT` e `QUEUE_SIZE`.
+`TryPublish` é usado pelo endpoint HTTP e retorna imediatamente quando não há espaço, permitindo responder `503 Service Unavailable`. `Publish` aguarda espaço ou cancelamento do contexto e é usado na recuperação para não descartar eventos persistidos. `Events`, `Stats` e `Close` completam o ciclo de consumo, observabilidade e encerramento.
+
+A quantidade de workers e a capacidade da fila em memória são configuradas por `WORKER_COUNT` e `QUEUE_SIZE`.
 
 ## Retry com backoff
 

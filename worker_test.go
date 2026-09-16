@@ -26,7 +26,7 @@ func TestRecoverQueuedEventsRestoresOnlyPendingEvents(t *testing.T) {
 		t.Fatalf("failed to save queued event: %v", err)
 	}
 
-	eventQueue := make(chan Event, 2)
+	eventQueue := NewMemoryEventQueue(2)
 	metrics := NewMetrics()
 	recovered, err := recoverQueuedEvents(context.Background(), eventQueue, metrics, eventStore)
 	if err != nil {
@@ -36,11 +36,12 @@ func TestRecoverQueuedEventsRestoresOnlyPendingEvents(t *testing.T) {
 	if recovered != 1 {
 		t.Fatalf("expected 1 recovered event, got %d", recovered)
 	}
-	if len(eventQueue) != 1 {
-		t.Fatalf("expected queue length 1, got %d", len(eventQueue))
+	queueStats := eventQueue.Stats()
+	if queueStats.Length != 1 {
+		t.Fatalf("expected queue length 1, got %d", queueStats.Length)
 	}
 
-	event := <-eventQueue
+	event := <-eventQueue.Events()
 	if event.ID != queuedEvent.ID {
 		t.Fatalf("expected recovered event %s, got %s", queuedEvent.ID, event.ID)
 	}
@@ -48,7 +49,7 @@ func TestRecoverQueuedEventsRestoresOnlyPendingEvents(t *testing.T) {
 		t.Fatalf("expected recovered payload orderId ord-123, got %v", event.Payload["orderId"])
 	}
 
-	snapshot := metrics.Snapshot(len(eventQueue), cap(eventQueue))
+	snapshot := metrics.Snapshot(queueStats.Length, queueStats.Capacity)
 	if snapshot.EventsQueued != 1 {
 		t.Fatalf("expected 1 queued event in metrics, got %d", snapshot.EventsQueued)
 	}

@@ -27,7 +27,8 @@ func main() {
 	}
 	defer eventStore.Close()
 
-	app := NewApp(config, eventStore)
+	eventQueue := NewMemoryEventQueue(config.QueueSize)
+	app := NewApp(config, eventStore, eventQueue)
 
 	var workers sync.WaitGroup
 	startWorkers(config.WorkerCount, app.eventQueue, &workers, config, app.metrics, app.deadLetters, app.eventStore)
@@ -35,7 +36,9 @@ func main() {
 	recoveredEvents, err := recoverQueuedEvents(context.Background(), app.eventQueue, app.metrics, app.eventStore)
 	if err != nil {
 		slog.Error("recover queued events failed", "error", err)
-		close(app.eventQueue)
+		if closeErr := app.eventQueue.Close(); closeErr != nil {
+			slog.Error("close event queue failed", "error", closeErr)
+		}
 		workers.Wait()
 		os.Exit(1)
 	}
@@ -73,7 +76,9 @@ func main() {
 		slog.Error("server shutdown error", "error", err)
 	}
 
-	close(app.eventQueue)
+	if err := app.eventQueue.Close(); err != nil {
+		slog.Error("close event queue failed", "error", err)
+	}
 	workers.Wait()
 
 	slog.Info("shutdown complete")

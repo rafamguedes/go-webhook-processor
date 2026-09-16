@@ -116,11 +116,12 @@ func TestCreateEventHandlerQueuesValidEvent(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusAccepted, response.Code)
 	}
 
-	if len(app.eventQueue) != 1 {
-		t.Fatalf("expected queue length 1, got %d", len(app.eventQueue))
+	queueStats := app.eventQueue.Stats()
+	if queueStats.Length != 1 {
+		t.Fatalf("expected queue length 1, got %d", queueStats.Length)
 	}
 
-	event := <-app.eventQueue
+	event := <-app.eventQueue.Events()
 	if event.ID != "evt-001" {
 		t.Fatalf("expected event id evt-001, got %s", event.ID)
 	}
@@ -138,7 +139,8 @@ func TestCreateEventHandlerRejectsDuplicateEventIDAfterAppRestart(t *testing.T) 
 	firstResponse := httptest.NewRecorder()
 	app.createEventHandler(firstResponse, firstRequest)
 
-	restartedApp := NewApp(testConfig(), app.eventStore)
+	config := testConfig()
+	restartedApp := NewApp(config, app.eventStore, NewMemoryEventQueue(config.QueueSize))
 	secondRequest := httptest.NewRequest(http.MethodPost, "/events", strings.NewReader(body))
 	secondResponse := httptest.NewRecorder()
 	restartedApp.createEventHandler(secondResponse, secondRequest)
@@ -147,7 +149,8 @@ func TestCreateEventHandlerRejectsDuplicateEventIDAfterAppRestart(t *testing.T) 
 		t.Fatalf("expected status %d, got %d", http.StatusConflict, secondResponse.Code)
 	}
 
-	snapshot := restartedApp.metrics.Snapshot(len(restartedApp.eventQueue), cap(restartedApp.eventQueue))
+	queueStats := restartedApp.eventQueue.Stats()
+	snapshot := restartedApp.metrics.Snapshot(queueStats.Length, queueStats.Capacity)
 	if snapshot.EventsDuplicated != 1 {
 		t.Fatalf("expected 1 duplicated event, got %d", snapshot.EventsDuplicated)
 	}
@@ -166,7 +169,8 @@ func TestCreateEventHandlerRejectsMissingID(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, response.Code)
 	}
 
-	if len(app.eventQueue) != 0 {
-		t.Fatalf("expected queue length 0, got %d", len(app.eventQueue))
+	queueStats := app.eventQueue.Stats()
+	if queueStats.Length != 0 {
+		t.Fatalf("expected queue length 0, got %d", queueStats.Length)
 	}
 }

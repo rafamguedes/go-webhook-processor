@@ -10,7 +10,7 @@ flowchart LR
     api[Servidor HTTP Go]
     handler[POST /events]
     validation[Validação do JSON]
-    queue[Fila interna<br/>chan Event]
+    queue[EventQueue<br/>MemoryEventQueue / chan Event]
     workers[Workers concorrentes<br/>goroutines]
     processor[Processamento do evento]
     health[GET /health]
@@ -122,4 +122,4 @@ sequenceDiagram
 Cliente externo -> HTTP server -> handler -> validação -> SQLite/idempotência -> fila interna -> workers -> retry/backoff -> processamento
 ```
 
-A fila ainda é em memória. Em uma evolução futura, ela pode ser substituída ou complementada por uma fila externa, como RabbitMQ, Kafka, SQS ou Redis Streams.
+A aplicação depende da interface `EventQueue`. A implementação atual é `MemoryEventQueue`, baseada em `chan Event`; uma implementação externa poderá cumprir o mesmo contrato usando RabbitMQ, Kafka, SQS ou Redis Streams, sem fazer handlers e workers conhecerem os detalhes de conexão.

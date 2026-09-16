@@ -3,26 +3,27 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
 )
 
 func (app App) healthHandler(w http.ResponseWriter, r *http.Request) {
+	queueStats := app.eventQueue.Stats()
 	response := HealthResponse{
 		Status:        "ok",
 		Time:          time.Now().Format(time.RFC3339),
 		Date:          time.Now().Format("2006-01-02"),
-		QueueLength:   len(app.eventQueue),
-		QueueCapacity: cap(app.eventQueue),
+		QueueLength:   queueStats.Length,
+		QueueCapacity: queueStats.Capacity,
 	}
 
 	writeJSON(w, http.StatusOK, response)
 }
 
 func (app App) metricsHandler(w http.ResponseWriter, r *http.Request) {
-	response := app.metrics.Snapshot(len(app.eventQueue), cap(app.eventQueue))
+	queueStats := app.eventQueue.Stats()
+	response := app.metrics.Snapshot(queueStats.Length, queueStats.Capacity)
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -69,20 +70,27 @@ func (app App) createEventHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	select {
-	case app.eventQueue <- event:
-		app.metrics.IncEventsQueued()
-		slog.Info("event queued", "event_id", event.ID, "event_type", event.Type, "queue_length", len(app.eventQueue), "queue_capacity", cap(app.eventQueue))
-	default:
+	if err := app.eventQueue.TryPublish(r.Context(), event); err != nil {
 		app.metrics.IncEventsRejected()
-		markErr := app.eventStore.MarkFailed(r.Context(), event.ID, 0, fmt.Errorf("event queue is full"))
-		if markErr != nil {
-			slog.Error("mark event failed after full queue", "event_id", event.ID, "error", markErr)
+		if errors.Is(err, ErrEventQueueFull) {
+			markErr := app.eventStore.MarkFailed(r.Context(), event.ID, 0, err)
+			if markErr != nil {
+				slog.Error("mark event failed after full queue", "event_id", event.ID, "error", markErr)
+			}
+			queueStats := app.eventQueue.Stats()
+			slog.Warn("event queue is full", "event_id", event.ID, "event_type", event.Type, "queue_capacity", queueStats.Capacity)
+			writeError(w, http.StatusServiceUnavailable, "event queue is full")
+			return
 		}
-		slog.Warn("event queue is full", "event_id", event.ID, "event_type", event.Type, "queue_capacity", cap(app.eventQueue))
-		writeError(w, http.StatusServiceUnavailable, "event queue is full")
+
+		slog.Error("publish event failed", "event_id", event.ID, "event_type", event.Type, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to queue event")
 		return
 	}
+
+	app.metrics.IncEventsQueued()
+	queueStats := app.eventQueue.Stats()
+	slog.Info("event queued", "event_id", event.ID, "event_type", event.Type, "queue_length", queueStats.Length, "queue_capacity", queueStats.Capacity)
 
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"accepted": true,
