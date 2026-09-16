@@ -108,6 +108,38 @@ func (store *EventStore) MarkFailed(ctx context.Context, eventID string, attempt
 	return nil
 }
 
+func (store *EventStore) ListQueued(ctx context.Context) ([]Event, error) {
+	rows, err := store.db.QueryContext(ctx, `
+		SELECT id, type, payload
+		FROM events
+		WHERE status = ?
+		ORDER BY created_at ASC
+	`, EventStatusQueued)
+	if err != nil {
+		return nil, fmt.Errorf("list queued events: %w", err)
+	}
+	defer rows.Close()
+
+	events := make([]Event, 0)
+	for rows.Next() {
+		var event Event
+		var payload string
+		if err := rows.Scan(&event.ID, &event.Type, &payload); err != nil {
+			return nil, fmt.Errorf("scan queued event: %w", err)
+		}
+		if err := json.Unmarshal([]byte(payload), &event.Payload); err != nil {
+			return nil, fmt.Errorf("decode queued event %s payload: %w", event.ID, err)
+		}
+		events = append(events, event)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate queued events: %w", err)
+	}
+
+	return events, nil
+}
+
 func (store *EventStore) List(ctx context.Context, limit int) ([]StoredEvent, error) {
 	rows, err := store.db.QueryContext(ctx, `
 		SELECT id, type, payload, status, error, attempts, created_at, updated_at

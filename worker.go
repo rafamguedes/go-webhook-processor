@@ -10,6 +10,24 @@ import (
 
 type eventProcessor func(workerID int, event Event) error
 
+func recoverQueuedEvents(ctx context.Context, eventQueue chan<- Event, metrics *Metrics, eventStore *EventStore) (int, error) {
+	events, err := eventStore.ListQueued(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	for index, event := range events {
+		select {
+		case eventQueue <- event:
+			metrics.IncEventsQueued()
+		case <-ctx.Done():
+			return index, fmt.Errorf("recover queued events: %w", ctx.Err())
+		}
+	}
+
+	return len(events), nil
+}
+
 func startWorkers(count int, eventQueue <-chan Event, workers *sync.WaitGroup, config Config, metrics *Metrics, deadLetters *DeadLetterStore, eventStore *EventStore) {
 	for workerID := 1; workerID <= count; workerID++ {
 		workers.Add(1)

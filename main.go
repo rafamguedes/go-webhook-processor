@@ -32,6 +32,15 @@ func main() {
 	var workers sync.WaitGroup
 	startWorkers(config.WorkerCount, app.eventQueue, &workers, config, app.metrics, app.deadLetters, app.eventStore)
 
+	recoveredEvents, err := recoverQueuedEvents(context.Background(), app.eventQueue, app.metrics, app.eventStore)
+	if err != nil {
+		slog.Error("recover queued events failed", "error", err)
+		close(app.eventQueue)
+		workers.Wait()
+		os.Exit(1)
+	}
+	slog.Info("queued events recovered", "count", recoveredEvents)
+
 	server := &http.Server{
 		Addr:              config.ServerAddress(),
 		Handler:           app.routes(),

@@ -169,6 +169,8 @@ Isso evita processamento duplicado em cenários comuns de webhook, nos quais o s
 
 A deduplicação é persistente: a chave primária `events.id` no SQLite impede que o mesmo evento seja aceito novamente, inclusive após a reinicialização da aplicação.
 
+Na inicialização, a aplicação consulta os eventos com status `queued` e os recoloca na fila interna antes de disponibilizar o servidor HTTP. Eventos já marcados como `processed` ou `failed` não são recuperados.
+
 ## Concorrência
 
 A aplicação usa uma fila interna baseada em `chan Event` e workers iniciados como goroutines.
