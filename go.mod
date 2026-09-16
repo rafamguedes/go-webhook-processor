@@ -1,6 +1,8 @@
-module go-webhook-lab
+module github.com/rafamguedes/go-webhook-processor
 
 go 1.27.1
+
+require modernc.org/sqlite v1.59.0
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
@@ -12,5 +14,4 @@ require (
 	modernc.org/libc v1.75.7 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
-	modernc.org/sqlite v1.59.0 // indirect
 )

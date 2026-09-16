@@ -86,14 +86,13 @@ Possíveis respostas:
 main.go             bootstrap, servidor HTTP e encerramento gracioso
 config.go           leitura e validação de configurações por ambiente
 logger.go           configuração de logs estruturados com slog
-event_store.go      persistência SQLite dos eventos e status
 app.go              estado da aplicação, fila interna e registro das rotas
 models.go           contratos de entrada e saída usados pela API
 metrics.go          contadores thread-safe e snapshot de métricas
-dedup.go            controle de idempotência em memória por event.id
+event_store.go      persistência SQLite, estados e idempotência por event.id
 deadletter.go       armazenamento em memória dos eventos com falha permanente
 handlers.go         handlers HTTP, validação, métricas e respostas JSON
-worker.go           workers, retry e backoff do processamento assíncrono
+worker.go           recuperação, workers, retry e backoff do processamento assíncrono
 *_test.go           testes automatizados
 .env.example        exemplo de variáveis de ambiente
 Dockerfile          build de imagem containerizada

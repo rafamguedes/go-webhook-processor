@@ -27,3 +27,24 @@ func newTestEventStoreWithPath(t *testing.T) (*EventStore, string) {
 
 	return store, databasePath
 }
+
+func newTestApp(t *testing.T) App {
+	t.Helper()
+
+	return NewApp(testConfig(), newTestEventStore(t))
+}
+
+func testConfig() Config {
+	return Config{
+		Port:                     "8080",
+		QueueSize:                100,
+		WorkerCount:              3,
+		ReadHeaderTimeoutSeconds: 5,
+		ShutdownTimeoutSeconds:   10,
+		LogFormat:                "json",
+		MaxRetries:               3,
+		RetryBackoffSeconds:      1,
+		DeadLetterCapacity:       100,
+		DatabasePath:             "./events-test.db",
+	}
+}
