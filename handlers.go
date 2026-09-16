@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -54,19 +55,17 @@ func (app App) createEventHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !app.deduplicator.Remember(event.ID) {
-		app.metrics.IncEventsRejected()
-		app.metrics.IncEventsDuplicated()
-		slog.Warn("event rejected", "reason", "duplicate event id", "event_id", event.ID, "event_type", event.Type)
-		writeError(w, http.StatusConflict, "duplicate event id")
-		return
-	}
-
 	if err := app.eventStore.SaveQueued(r.Context(), event); err != nil {
 		app.metrics.IncEventsRejected()
-		app.metrics.IncEventsDuplicated()
-		slog.Warn("event rejected", "reason", "event already persisted", "event_id", event.ID, "event_type", event.Type, "error", err)
-		writeError(w, http.StatusConflict, "event already exists")
+		if errors.Is(err, ErrEventAlreadyExists) {
+			app.metrics.IncEventsDuplicated()
+			slog.Warn("event rejected", "reason", "duplicate event id", "event_id", event.ID, "event_type", event.Type)
+			writeError(w, http.StatusConflict, "duplicate event id")
+			return
+		}
+
+		slog.Error("failed to persist event", "event_id", event.ID, "event_type", event.Type, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to persist event")
 		return
 	}
 

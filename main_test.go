@@ -18,7 +18,6 @@ func TestLoadConfigUsesDefaults(t *testing.T) {
 	t.Setenv("MAX_RETRIES", "")
 	t.Setenv("RETRY_BACKOFF_SECONDS", "")
 	t.Setenv("DEAD_LETTER_CAPACITY", "")
-	t.Setenv("EVENT_DEDUP_CAPACITY", "")
 
 	config, err := LoadConfig()
 	if err != nil {
@@ -52,10 +51,6 @@ func TestLoadConfigUsesDefaults(t *testing.T) {
 	if config.DeadLetterCapacity != 100 {
 		t.Fatalf("expected default dead letter capacity 100, got %d", config.DeadLetterCapacity)
 	}
-
-	if config.EventDedupCapacity != 1000 {
-		t.Fatalf("expected default event dedup capacity 1000, got %d", config.EventDedupCapacity)
-	}
 }
 
 func TestLoadConfigReadsEnvironmentVariables(t *testing.T) {
@@ -68,7 +63,6 @@ func TestLoadConfigReadsEnvironmentVariables(t *testing.T) {
 	t.Setenv("MAX_RETRIES", "5")
 	t.Setenv("RETRY_BACKOFF_SECONDS", "2")
 	t.Setenv("DEAD_LETTER_CAPACITY", "20")
-	t.Setenv("EVENT_DEDUP_CAPACITY", "30")
 
 	config, err := LoadConfig()
 	if err != nil {
@@ -101,10 +95,6 @@ func TestLoadConfigReadsEnvironmentVariables(t *testing.T) {
 
 	if config.DeadLetterCapacity != 20 {
 		t.Fatalf("expected dead letter capacity 20, got %d", config.DeadLetterCapacity)
-	}
-
-	if config.EventDedupCapacity != 30 {
-		t.Fatalf("expected event dedup capacity 30, got %d", config.EventDedupCapacity)
 	}
 }
 
@@ -141,15 +131,6 @@ func TestLoadConfigRejectsInvalidDeadLetterCapacity(t *testing.T) {
 	_, err := LoadConfig()
 	if err == nil {
 		t.Fatal("expected config to reject invalid dead letter capacity")
-	}
-}
-
-func TestLoadConfigRejectsInvalidEventDedupCapacity(t *testing.T) {
-	t.Setenv("EVENT_DEDUP_CAPACITY", "0")
-
-	_, err := LoadConfig()
-	if err == nil {
-		t.Fatal("expected config to reject invalid event dedup capacity")
 	}
 }
 
@@ -275,7 +256,7 @@ func TestCreateEventHandlerQueuesValidEvent(t *testing.T) {
 	}
 }
 
-func TestCreateEventHandlerRejectsDuplicateEventID(t *testing.T) {
+func TestCreateEventHandlerRejectsDuplicateEventIDAfterAppRestart(t *testing.T) {
 	app := newTestApp(t)
 	body := `{"id":"evt-001","type":"payment.created","payload":{"amount":100}}`
 
@@ -283,15 +264,16 @@ func TestCreateEventHandlerRejectsDuplicateEventID(t *testing.T) {
 	firstResponse := httptest.NewRecorder()
 	app.createEventHandler(firstResponse, firstRequest)
 
+	restartedApp := NewApp(testConfig(), app.eventStore)
 	secondRequest := httptest.NewRequest(http.MethodPost, "/events", strings.NewReader(body))
 	secondResponse := httptest.NewRecorder()
-	app.createEventHandler(secondResponse, secondRequest)
+	restartedApp.createEventHandler(secondResponse, secondRequest)
 
 	if secondResponse.Code != http.StatusConflict {
 		t.Fatalf("expected status %d, got %d", http.StatusConflict, secondResponse.Code)
 	}
 
-	snapshot := app.metrics.Snapshot(len(app.eventQueue), cap(app.eventQueue))
+	snapshot := restartedApp.metrics.Snapshot(len(restartedApp.eventQueue), cap(restartedApp.eventQueue))
 	if snapshot.EventsDuplicated != 1 {
 		t.Fatalf("expected 1 duplicated event, got %d", snapshot.EventsDuplicated)
 	}
@@ -332,7 +314,6 @@ func testConfig() Config {
 		MaxRetries:               3,
 		RetryBackoffSeconds:      1,
 		DeadLetterCapacity:       100,
-		EventDedupCapacity:       1000,
 		DatabasePath:             "./events-test.db",
 	}
 }

@@ -23,8 +23,7 @@ Esse padrão é útil para:
 Cliente externo
   -> POST /events
     -> validação do JSON
-      -> deduplicação por event.id
-        -> persistência em SQLite como queued
+      -> persistência em SQLite como queued e deduplicação por event.id
           -> envio para a fila interna
             -> resposta HTTP 202 Accepted
               -> workers processam eventos em background com retry/backoff
@@ -116,7 +115,6 @@ LOG_FORMAT=json
 MAX_RETRIES=3
 RETRY_BACKOFF_SECONDS=1
 DEAD_LETTER_CAPACITY=100
-EVENT_DEDUP_CAPACITY=1000
 DATABASE_PATH=./events.db
 ```
 
@@ -132,7 +130,6 @@ LOG_FORMAT                    formato dos logs: json ou text
 MAX_RETRIES                   quantidade de novas tentativas após a primeira falha
 RETRY_BACKOFF_SECONDS         base em segundos para o backoff entre tentativas
 DEAD_LETTER_CAPACITY          quantidade máxima de eventos mantidos na dead-letter queue
-EVENT_DEDUP_CAPACITY          quantidade máxima de event.id mantidos para deduplicação
 DATABASE_PATH                 caminho do arquivo SQLite usado para persistir eventos
 ```
 
@@ -170,7 +167,7 @@ Se o mesmo `event.id` for recebido novamente, a aplicação rejeita o evento com
 
 Isso evita processamento duplicado em cenários comuns de webhook, nos quais o sistema externo pode reenviar o mesmo evento por timeout, falha de rede ou política própria de retry.
 
-A memória de deduplicação é limitada por `EVENT_DEDUP_CAPACITY`. Quando a capacidade é atingida, o ID mais antigo é descartado para abrir espaço para novos IDs.
+A deduplicação é persistente: a chave primária `events.id` no SQLite impede que o mesmo evento seja aceito novamente, inclusive após a reinicialização da aplicação.
 
 ## Concorrência
 

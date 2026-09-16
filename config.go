@@ -17,7 +17,6 @@ type Config struct {
 	MaxRetries               int
 	RetryBackoffSeconds      int
 	DeadLetterCapacity       int
-	EventDedupCapacity       int
 	DatabasePath             string
 }
 
@@ -32,7 +31,6 @@ func LoadConfig() (Config, error) {
 		MaxRetries:               getEnvAsInt("MAX_RETRIES", 3),
 		RetryBackoffSeconds:      getEnvAsInt("RETRY_BACKOFF_SECONDS", 1),
 		DeadLetterCapacity:       getEnvAsInt("DEAD_LETTER_CAPACITY", 100),
-		EventDedupCapacity:       getEnvAsInt("EVENT_DEDUP_CAPACITY", 1000),
 		DatabasePath:             getEnv("DATABASE_PATH", "./events.db"),
 	}
 
@@ -66,10 +64,6 @@ func LoadConfig() (Config, error) {
 
 	if config.DeadLetterCapacity <= 0 {
 		return Config{}, fmt.Errorf("DEAD_LETTER_CAPACITY must be greater than zero")
-	}
-
-	if config.EventDedupCapacity <= 0 {
-		return Config{}, fmt.Errorf("EVENT_DEDUP_CAPACITY must be greater than zero")
 	}
 
 	if config.DatabasePath == "" {

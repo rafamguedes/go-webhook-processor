@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestEventStorePersistsStatusChanges(t *testing.T) {
 	store := newTestEventStore(t)
@@ -40,7 +43,7 @@ func TestEventStoreRejectsDuplicateID(t *testing.T) {
 		t.Fatalf("failed to save queued event: %v", err)
 	}
 
-	if err := store.SaveQueued(t.Context(), event); err == nil {
-		t.Fatal("expected duplicate event id to fail")
+	if err := store.SaveQueued(t.Context(), event); !errors.Is(err, ErrEventAlreadyExists) {
+		t.Fatalf("expected duplicate event error, got %v", err)
 	}
 }

@@ -4,11 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
+
+var ErrEventAlreadyExists = errors.New("event already exists")
 
 const (
 	EventStatusQueued    = "queued"
@@ -57,12 +60,21 @@ func (store *EventStore) SaveQueued(ctx context.Context, event Event) error {
 	}
 
 	now := time.Now().UTC()
-	_, err = store.db.ExecContext(ctx, `
+	result, err := store.db.ExecContext(ctx, `
 		INSERT INTO events (id, type, payload, status, attempts, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO NOTHING
 	`, event.ID, event.Type, string(payload), EventStatusQueued, 0, now, now)
 	if err != nil {
 		return fmt.Errorf("save queued event: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check saved event: %w", err)
+	}
+	if rowsAffected == 0 {
+		return ErrEventAlreadyExists
 	}
 
 	return nil
