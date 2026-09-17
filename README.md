@@ -116,6 +116,9 @@ MAX_RETRIES=3
 RETRY_BACKOFF_SECONDS=1
 DEAD_LETTER_CAPACITY=100
 DATABASE_PATH=./events.db
+QUEUE_PROVIDER=memory
+RABBITMQ_URL=amqp://webhook:webhook_dev@localhost:5672/
+RABBITMQ_QUEUE=webhook.events
 ```
 
 Descrição das variáveis:
@@ -131,6 +134,9 @@ MAX_RETRIES                   quantidade de novas tentativas após a primeira fa
 RETRY_BACKOFF_SECONDS         base em segundos para o backoff entre tentativas
 DEAD_LETTER_CAPACITY          quantidade máxima de eventos mantidos na dead-letter queue
 DATABASE_PATH                 caminho do arquivo SQLite usado para persistir eventos
+QUEUE_PROVIDER                implementação da fila: memory ou rabbitmq
+RABBITMQ_URL                  endereço AMQP usado quando o provider for rabbitmq
+RABBITMQ_QUEUE                nome da fila durável no RabbitMQ
 ```
 
 ## Persistência
@@ -225,7 +231,24 @@ http://localhost:8080
 
 ## Docker
 
-Build da imagem:
+O Compose inicia a aplicação, o SQLite persistido e o RabbitMQ com painel de gerenciamento. Copie `.env.example` para `.env` e altere as credenciais de desenvolvimento antes de compartilhar o ambiente.
+
+```powershell
+Copy-Item .env.example .env
+docker compose up -d --build
+```
+
+Serviços locais:
+
+```text
+API HTTP             http://localhost:8080
+RabbitMQ AMQP        localhost:5672
+RabbitMQ Management  http://localhost:15672
+```
+
+Enquanto o adaptador `RabbitMQEventQueue` não estiver implementado, mantenha `QUEUE_PROVIDER=memory`. Selecionar `rabbitmq` encerra a aplicação explicitamente, evitando uso silencioso da fila errada.
+
+Build isolado da imagem:
 
 ```powershell
 docker build -t go-webhook-processor:local .

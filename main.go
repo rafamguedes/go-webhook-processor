@@ -27,7 +27,11 @@ func main() {
 	}
 	defer eventStore.Close()
 
-	eventQueue := NewMemoryEventQueue(config.QueueSize)
+	eventQueue, err := NewConfiguredEventQueue(config)
+	if err != nil {
+		slog.Error("configure event queue failed", "provider", config.QueueProvider, "error", err)
+		os.Exit(1)
+	}
 	app := NewApp(config, eventStore, eventQueue)
 
 	var workers sync.WaitGroup

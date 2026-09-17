@@ -2,9 +2,16 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
+)
+
+const (
+	QueueProviderMemory   = "memory"
+	QueueProviderRabbitMQ = "rabbitmq"
 )
 
 type Config struct {
@@ -18,6 +25,9 @@ type Config struct {
 	RetryBackoffSeconds      int
 	DeadLetterCapacity       int
 	DatabasePath             string
+	QueueProvider            string
+	RabbitMQURL              string
+	RabbitMQQueue            string
 }
 
 func LoadConfig() (Config, error) {
@@ -32,6 +42,9 @@ func LoadConfig() (Config, error) {
 		RetryBackoffSeconds:      getEnvAsInt("RETRY_BACKOFF_SECONDS", 1),
 		DeadLetterCapacity:       getEnvAsInt("DEAD_LETTER_CAPACITY", 100),
 		DatabasePath:             getEnv("DATABASE_PATH", "./events.db"),
+		QueueProvider:            getEnv("QUEUE_PROVIDER", QueueProviderMemory),
+		RabbitMQURL:              getEnv("RABBITMQ_URL", "amqp://webhook:webhook_dev@localhost:5672/"),
+		RabbitMQQueue:            getEnv("RABBITMQ_QUEUE", "webhook.events"),
 	}
 
 	if config.QueueSize <= 0 {
@@ -68,6 +81,21 @@ func LoadConfig() (Config, error) {
 
 	if config.DatabasePath == "" {
 		return Config{}, fmt.Errorf("DATABASE_PATH is required")
+	}
+
+	if config.QueueProvider != QueueProviderMemory && config.QueueProvider != QueueProviderRabbitMQ {
+		return Config{}, fmt.Errorf("QUEUE_PROVIDER must be memory or rabbitmq")
+	}
+
+	if config.QueueProvider == QueueProviderRabbitMQ {
+		if strings.TrimSpace(config.RabbitMQQueue) == "" {
+			return Config{}, fmt.Errorf("RABBITMQ_QUEUE is required when QUEUE_PROVIDER is rabbitmq")
+		}
+
+		rabbitMQURL, err := url.Parse(config.RabbitMQURL)
+		if err != nil || rabbitMQURL.Host == "" || (rabbitMQURL.Scheme != "amqp" && rabbitMQURL.Scheme != "amqps") {
+			return Config{}, fmt.Errorf("RABBITMQ_URL must be a valid amqp or amqps URL when QUEUE_PROVIDER is rabbitmq")
+		}
 	}
 
 	return config, nil

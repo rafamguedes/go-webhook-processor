@@ -116,6 +116,14 @@ sequenceDiagram
 14. Na inicialização, eventos que permaneceram como `queued` são recuperados do SQLite antes da abertura do servidor HTTP.
 15. Quando a aplicação recebe `Ctrl+C` ou `SIGTERM`, ela executa shutdown gracioso.
 
+## Infraestrutura Docker Compose
+
+O Compose provisiona o serviço Go e um RabbitMQ persistente com health check. Nesta etapa, a aplicação continua usando `MemoryEventQueue`; a conexão indicada abaixo será implementada pelo futuro adaptador `RabbitMQEventQueue`.
+
+```text
+webhook-processor -- futura conexão AMQP --> rabbitmq:5672
+navegador --------------------------------> rabbitmq:15672
+```
 ## Componentes atuais
 
 ```text

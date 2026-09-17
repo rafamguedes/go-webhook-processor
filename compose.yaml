@@ -1,4 +1,23 @@
 services:
+  rabbitmq:
+    image: rabbitmq:4.3.6-management-alpine
+    container_name: go-webhook-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-webhook}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-webhook_dev}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
   webhook-processor:
     build:
       context: .
@@ -9,9 +28,17 @@ services:
       PORT: "8080"
       LOG_FORMAT: json
       DATABASE_PATH: /data/events.db
+      QUEUE_PROVIDER: ${QUEUE_PROVIDER:-memory}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-webhook}:${RABBITMQ_PASSWORD:-webhook_dev}@rabbitmq:5672/
+      RABBITMQ_QUEUE: ${RABBITMQ_QUEUE:-webhook.events}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     ports:
       - "8080:8080"
     volumes:
       - ./data:/data
     restart: unless-stopped
 
+volumes:
+  rabbitmq-data:

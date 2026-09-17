@@ -49,3 +49,24 @@ func TestMemoryEventQueueCloseClosesEvents(t *testing.T) {
 		t.Fatal("expected events channel to be closed")
 	}
 }
+func TestNewConfiguredEventQueueCreatesMemoryQueue(t *testing.T) {
+	config := testConfig()
+
+	queue, err := NewConfiguredEventQueue(config)
+	if err != nil {
+		t.Fatalf("expected memory queue to be configured, got %v", err)
+	}
+	if _, ok := queue.(*MemoryEventQueue); !ok {
+		t.Fatalf("expected *MemoryEventQueue, got %T", queue)
+	}
+}
+
+func TestNewConfiguredEventQueueRejectsRabbitMQUntilAdapterExists(t *testing.T) {
+	config := testConfig()
+	config.QueueProvider = QueueProviderRabbitMQ
+
+	_, err := NewConfiguredEventQueue(config)
+	if err == nil {
+		t.Fatal("expected rabbitmq provider to be rejected until adapter exists")
+	}
+}

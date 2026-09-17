@@ -47,5 +47,6 @@ func testConfig() Config {
 		RetryBackoffSeconds:      1,
 		DeadLetterCapacity:       100,
 		DatabasePath:             "./events-test.db",
+		QueueProvider:            QueueProviderMemory,
 	}
 }

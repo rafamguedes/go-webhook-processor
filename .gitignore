@@ -3,4 +3,6 @@ data/
 *.db-shm
 *.db-wal
 *.exe
-
+.env
+.env.*
+!.env.example

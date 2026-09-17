@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 )
 
@@ -34,6 +35,17 @@ var _ EventQueue = (*MemoryEventQueue)(nil)
 type MemoryEventQueue struct {
 	events    chan Event
 	closeOnce sync.Once
+}
+
+func NewConfiguredEventQueue(config Config) (EventQueue, error) {
+	switch config.QueueProvider {
+	case QueueProviderMemory:
+		return NewMemoryEventQueue(config.QueueSize), nil
+	case QueueProviderRabbitMQ:
+		return nil, fmt.Errorf("queue provider rabbitmq is not implemented yet")
+	default:
+		return nil, fmt.Errorf("unsupported queue provider %q", config.QueueProvider)
+	}
 }
 
 func NewMemoryEventQueue(capacity int) *MemoryEventQueue {
