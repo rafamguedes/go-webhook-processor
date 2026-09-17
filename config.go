@@ -28,6 +28,8 @@ type Config struct {
 	QueueProvider            string
 	RabbitMQURL              string
 	RabbitMQQueue            string
+	OutboxPollIntervalMs     int
+	OutboxBatchSize          int
 }
 
 func LoadConfig() (Config, error) {
@@ -45,6 +47,8 @@ func LoadConfig() (Config, error) {
 		QueueProvider:            getEnv("QUEUE_PROVIDER", QueueProviderMemory),
 		RabbitMQURL:              getEnv("RABBITMQ_URL", "amqp://webhook:webhook_dev@localhost:5672/"),
 		RabbitMQQueue:            getEnv("RABBITMQ_QUEUE", "webhook.events"),
+		OutboxPollIntervalMs:     getEnvAsInt("OUTBOX_POLL_INTERVAL_MS", 500),
+		OutboxBatchSize:          getEnvAsInt("OUTBOX_BATCH_SIZE", 100),
 	}
 
 	if config.QueueSize <= 0 {
@@ -83,6 +87,14 @@ func LoadConfig() (Config, error) {
 		return Config{}, fmt.Errorf("DATABASE_PATH is required")
 	}
 
+	if config.OutboxPollIntervalMs <= 0 {
+		return Config{}, fmt.Errorf("OUTBOX_POLL_INTERVAL_MS must be greater than zero")
+	}
+
+	if config.OutboxBatchSize <= 0 {
+		return Config{}, fmt.Errorf("OUTBOX_BATCH_SIZE must be greater than zero")
+	}
+
 	if config.QueueProvider != QueueProviderMemory && config.QueueProvider != QueueProviderRabbitMQ {
 		return Config{}, fmt.Errorf("QUEUE_PROVIDER must be memory or rabbitmq")
 	}
@@ -111,6 +123,10 @@ func (config Config) ReadHeaderTimeout() time.Duration {
 
 func (config Config) ShutdownTimeout() time.Duration {
 	return time.Duration(config.ShutdownTimeoutSeconds) * time.Second
+}
+
+func (config Config) OutboxPollInterval() time.Duration {
+	return time.Duration(config.OutboxPollIntervalMs) * time.Millisecond
 }
 
 func (config Config) RetryBackoff(attempt int) time.Duration {

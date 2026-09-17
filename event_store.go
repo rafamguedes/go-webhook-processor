@@ -53,14 +53,20 @@ func (store *EventStore) Close() error {
 	return store.db.Close()
 }
 
-func (store *EventStore) SaveQueued(ctx context.Context, event Event) error {
+func (store *EventStore) SaveQueuedWithOutbox(ctx context.Context, event Event) error {
 	payload, err := json.Marshal(event.Payload)
 	if err != nil {
 		return fmt.Errorf("marshal event payload: %w", err)
 	}
 
+	tx, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin event transaction: %w", err)
+	}
+	defer tx.Rollback()
+
 	now := time.Now().UTC()
-	result, err := store.db.ExecContext(ctx, `
+	result, err := tx.ExecContext(ctx, `
 		INSERT INTO events (id, type, payload, status, attempts, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO NOTHING
@@ -77,9 +83,78 @@ func (store *EventStore) SaveQueued(ctx context.Context, event Event) error {
 		return ErrEventAlreadyExists
 	}
 
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO outbox (event_id, event_type, payload, attempts, created_at)
+		VALUES (?, ?, ?, 0, ?)
+	`, event.ID, event.Type, string(payload), now)
+	if err != nil {
+		return fmt.Errorf("save outbox message: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit event transaction: %w", err)
+	}
 	return nil
 }
 
+type OutboxMessage struct {
+	ID       int64
+	Event    Event
+	Attempts int
+}
+
+func (store *EventStore) ListPendingOutbox(ctx context.Context, limit int) ([]OutboxMessage, error) {
+	rows, err := store.db.QueryContext(ctx, `
+		SELECT id, event_id, event_type, payload, attempts
+		FROM outbox
+		WHERE published_at IS NULL
+		ORDER BY id ASC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list pending outbox messages: %w", err)
+	}
+	defer rows.Close()
+
+	messages := make([]OutboxMessage, 0)
+	for rows.Next() {
+		var message OutboxMessage
+		var payload string
+		if err := rows.Scan(&message.ID, &message.Event.ID, &message.Event.Type, &payload, &message.Attempts); err != nil {
+			return nil, fmt.Errorf("scan outbox message: %w", err)
+		}
+		if err := json.Unmarshal([]byte(payload), &message.Event.Payload); err != nil {
+			return nil, fmt.Errorf("decode outbox message %d payload: %w", message.ID, err)
+		}
+		messages = append(messages, message)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate outbox messages: %w", err)
+	}
+	return messages, nil
+}
+
+func (store *EventStore) MarkOutboxPublished(ctx context.Context, messageID int64) error {
+	_, err := store.db.ExecContext(ctx, `
+		UPDATE outbox SET published_at = ?, last_error = ''
+		WHERE id = ? AND published_at IS NULL
+	`, time.Now().UTC(), messageID)
+	if err != nil {
+		return fmt.Errorf("mark outbox message published: %w", err)
+	}
+	return nil
+}
+
+func (store *EventStore) MarkOutboxFailed(ctx context.Context, messageID int64, publishError error) error {
+	_, err := store.db.ExecContext(ctx, `
+		UPDATE outbox SET attempts = attempts + 1, last_error = ?
+		WHERE id = ? AND published_at IS NULL
+	`, publishError.Error(), messageID)
+	if err != nil {
+		return fmt.Errorf("mark outbox message failed: %w", err)
+	}
+	return nil
+}
 func (store *EventStore) MarkProcessed(ctx context.Context, eventID string, attempts int) error {
 	now := time.Now().UTC()
 	_, err := store.db.ExecContext(ctx, `
@@ -106,38 +181,6 @@ func (store *EventStore) MarkFailed(ctx context.Context, eventID string, attempt
 	}
 
 	return nil
-}
-
-func (store *EventStore) ListQueued(ctx context.Context) ([]Event, error) {
-	rows, err := store.db.QueryContext(ctx, `
-		SELECT id, type, payload
-		FROM events
-		WHERE status = ?
-		ORDER BY created_at ASC
-	`, EventStatusQueued)
-	if err != nil {
-		return nil, fmt.Errorf("list queued events: %w", err)
-	}
-	defer rows.Close()
-
-	events := make([]Event, 0)
-	for rows.Next() {
-		var event Event
-		var payload string
-		if err := rows.Scan(&event.ID, &event.Type, &payload); err != nil {
-			return nil, fmt.Errorf("scan queued event: %w", err)
-		}
-		if err := json.Unmarshal([]byte(payload), &event.Payload); err != nil {
-			return nil, fmt.Errorf("decode queued event %s payload: %w", event.ID, err)
-		}
-		events = append(events, event)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate queued events: %w", err)
-	}
-
-	return events, nil
 }
 
 func (store *EventStore) List(ctx context.Context, limit int) ([]StoredEvent, error) {
@@ -189,8 +232,27 @@ func (store *EventStore) migrate(ctx context.Context) error {
 			updated_at TIMESTAMP NOT NULL
 		);
 
+		CREATE TABLE IF NOT EXISTS outbox (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			event_id TEXT NOT NULL UNIQUE,
+			event_type TEXT NOT NULL,
+			payload TEXT NOT NULL,
+			attempts INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMP NOT NULL,
+			published_at TIMESTAMP,
+			FOREIGN KEY (event_id) REFERENCES events(id)
+		);
+
+		INSERT INTO outbox (event_id, event_type, payload, attempts, created_at)
+		SELECT id, type, payload, 0, created_at
+		FROM events
+		WHERE status = 'queued'
+		ON CONFLICT(event_id) DO NOTHING;
+
 		CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
 		CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
+		CREATE INDEX IF NOT EXISTS idx_outbox_pending ON outbox(published_at, id);
 	`)
 	if err != nil {
 		return fmt.Errorf("migrate event store: %w", err)

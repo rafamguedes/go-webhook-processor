@@ -9,7 +9,7 @@ func TestEventStorePersistsStatusChanges(t *testing.T) {
 	store := newTestEventStore(t)
 	event := testEvent()
 
-	if err := store.SaveQueued(t.Context(), event); err != nil {
+	if err := store.SaveQueuedWithOutbox(t.Context(), event); err != nil {
 		t.Fatalf("failed to save queued event: %v", err)
 	}
 
@@ -39,11 +39,11 @@ func TestEventStoreRejectsDuplicateID(t *testing.T) {
 	store := newTestEventStore(t)
 	event := testEvent()
 
-	if err := store.SaveQueued(t.Context(), event); err != nil {
+	if err := store.SaveQueuedWithOutbox(t.Context(), event); err != nil {
 		t.Fatalf("failed to save queued event: %v", err)
 	}
 
-	if err := store.SaveQueued(t.Context(), event); !errors.Is(err, ErrEventAlreadyExists) {
+	if err := store.SaveQueuedWithOutbox(t.Context(), event); !errors.Is(err, ErrEventAlreadyExists) {
 		t.Fatalf("expected duplicate event error, got %v", err)
 	}
 }

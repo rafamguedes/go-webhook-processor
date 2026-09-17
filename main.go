@@ -37,24 +37,9 @@ func main() {
 	var workers sync.WaitGroup
 	startWorkers(config.WorkerCount, app.eventQueue, &workers, config, app.metrics, app.deadLetters, app.eventStore)
 
-	if config.QueueProvider == QueueProviderMemory {
-		recoveredEvents, err := recoverQueuedEvents(context.Background(), app.eventQueue, app.metrics, app.eventStore)
-		if err != nil {
-			slog.Error("recover queued events failed", "error", err)
-			if stopErr := app.eventQueue.StopConsuming(); stopErr != nil {
-				slog.Error("stop event consumption failed", "error", stopErr)
-			}
-			workers.Wait()
-			if closeErr := app.eventQueue.Close(); closeErr != nil {
-				slog.Error("close event queue failed", "error", closeErr)
-			}
-			os.Exit(1)
-		}
-		slog.Info("queued events recovered", "count", recoveredEvents)
-	} else {
-		slog.Info("database queue recovery skipped", "provider", config.QueueProvider)
-	}
-
+	dispatcherContext, stopDispatcher := context.WithCancel(context.Background())
+	var dispatchers sync.WaitGroup
+	NewOutboxDispatcher(app.eventStore, app.eventQueue, config, app.metrics).Start(dispatcherContext, &dispatchers)
 	server := &http.Server{
 		Addr:              config.ServerAddress(),
 		Handler:           app.routes(),
@@ -86,6 +71,9 @@ func main() {
 	if err := server.Shutdown(shutdownContext); err != nil {
 		slog.Error("server shutdown error", "error", err)
 	}
+
+	stopDispatcher()
+	dispatchers.Wait()
 
 	if err := app.eventQueue.StopConsuming(); err != nil {
 		slog.Error("stop event consumption failed", "error", err)

@@ -103,7 +103,7 @@ func TestDeadLettersHandler(t *testing.T) {
 	}
 }
 
-func TestCreateEventHandlerQueuesValidEvent(t *testing.T) {
+func TestCreateEventHandlerPersistsValidEventInOutbox(t *testing.T) {
 	app := newTestApp(t)
 
 	body := `{"id":"evt-001","type":"payment.created","payload":{"amount":100}}`
@@ -116,21 +116,31 @@ func TestCreateEventHandlerQueuesValidEvent(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusAccepted, response.Code)
 	}
 
-	queueStats := app.eventQueue.Stats()
-	if queueStats.Length != 1 {
-		t.Fatalf("expected queue length 1, got %d", queueStats.Length)
+	if queueStats := app.eventQueue.Stats(); queueStats.Length != 0 {
+		t.Fatalf("expected handler not to publish directly, got queue length %d", queueStats.Length)
+	}
+
+	pending, err := app.eventStore.ListPendingOutbox(t.Context(), 10)
+	if err != nil {
+		t.Fatalf("failed to list pending outbox: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("expected 1 pending outbox message, got %d", len(pending))
+	}
+	if pending[0].Event.ID != "evt-001" {
+		t.Fatalf("expected event id evt-001, got %s", pending[0].Event.ID)
+	}
+
+	dispatcher := NewOutboxDispatcher(app.eventStore, app.eventQueue, app.config, app.metrics)
+	if err := dispatcher.DispatchPending(t.Context()); err != nil {
+		t.Fatalf("failed to dispatch outbox: %v", err)
 	}
 
 	event := (<-app.eventQueue.Events()).Event
 	if event.ID != "evt-001" {
-		t.Fatalf("expected event id evt-001, got %s", event.ID)
-	}
-
-	if event.Type != "payment.created" {
-		t.Fatalf("expected event type payment.created, got %s", event.Type)
+		t.Fatalf("expected published event id evt-001, got %s", event.ID)
 	}
 }
-
 func TestCreateEventHandlerRejectsDuplicateEventIDAfterAppRestart(t *testing.T) {
 	app := newTestApp(t)
 	body := `{"id":"evt-001","type":"payment.created","payload":{"amount":100}}`

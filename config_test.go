@@ -15,6 +15,8 @@ func TestLoadConfigUsesDefaults(t *testing.T) {
 	t.Setenv("QUEUE_PROVIDER", "")
 	t.Setenv("RABBITMQ_URL", "")
 	t.Setenv("RABBITMQ_QUEUE", "")
+	t.Setenv("OUTBOX_POLL_INTERVAL_MS", "")
+	t.Setenv("OUTBOX_BATCH_SIZE", "")
 
 	config, err := LoadConfig()
 	if err != nil {
@@ -56,6 +58,9 @@ func TestLoadConfigUsesDefaults(t *testing.T) {
 	if config.RabbitMQQueue != "webhook.events" {
 		t.Fatalf("expected default RabbitMQ queue webhook.events, got %s", config.RabbitMQQueue)
 	}
+	if config.OutboxPollIntervalMs != 500 || config.OutboxBatchSize != 100 {
+		t.Fatalf("expected default outbox settings 500ms/100, got %dms/%d", config.OutboxPollIntervalMs, config.OutboxBatchSize)
+	}
 }
 
 func TestLoadConfigReadsEnvironmentVariables(t *testing.T) {
@@ -71,6 +76,8 @@ func TestLoadConfigReadsEnvironmentVariables(t *testing.T) {
 	t.Setenv("QUEUE_PROVIDER", "rabbitmq")
 	t.Setenv("RABBITMQ_URL", "amqps://user:pass@rabbitmq.example.com/vhost")
 	t.Setenv("RABBITMQ_QUEUE", "events.production")
+	t.Setenv("OUTBOX_POLL_INTERVAL_MS", "250")
+	t.Setenv("OUTBOX_BATCH_SIZE", "20")
 
 	config, err := LoadConfig()
 	if err != nil {
@@ -115,6 +122,9 @@ func TestLoadConfigReadsEnvironmentVariables(t *testing.T) {
 
 	if config.RabbitMQQueue != "events.production" {
 		t.Fatalf("expected RabbitMQ queue events.production, got %s", config.RabbitMQQueue)
+	}
+	if config.OutboxPollIntervalMs != 250 || config.OutboxBatchSize != 20 {
+		t.Fatalf("expected outbox settings 250ms/20, got %dms/%d", config.OutboxPollIntervalMs, config.OutboxBatchSize)
 	}
 }
 

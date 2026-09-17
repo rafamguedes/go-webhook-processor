@@ -1,137 +1,101 @@
 # Arquitetura de Alto Nível
 
-Este documento descreve o fluxo atual do Go Webhook Processor.
+Este documento descreve o fluxo atual do Go Webhook Processor com Transactional Outbox.
 
 ## Fluxo principal
 
 ```mermaid
 flowchart LR
-    client[Cliente externo / sistema parceiro]
-    api[Servidor HTTP Go]
+    client[Cliente externo]
     handler[POST /events]
-    validation[Validação do JSON]
-    queue[EventQueue<br/>MemoryEventQueue / chan Event]
-    workers[Workers concorrentes<br/>goroutines]
-    processor[Processamento do evento]
-    health[GET /health]
-    metrics[GET /metrics]
-    deadletters[GET /dead-letters]
+    transaction[Transação SQLite]
+    events[(events)]
+    outbox[(outbox)]
+    accepted[202 Accepted]
+    dispatcher[OutboxDispatcher]
+    queue[EventQueue<br/>Memory ou RabbitMQ]
+    workers[Workers concorrentes]
+    processor[Processamento]
 
-    client -->|POST /events| api
-    api --> handler
-    handler --> validation
-    validation -->|evento inválido| badRequest[400 Bad Request]
-    validation -->|evento válido| store[(SQLite)]
-    store -->|event.id existente| conflict[409 Conflict]
-    store -->|novo evento: status queued| queue
-    queue -->|evento enfileirado| accepted[202 Accepted]
+    client --> handler
+    handler -->|valida e deduplica| transaction
+    transaction --> events
+    transaction --> outbox
+    transaction --> accepted
+    outbox -->|mensagens sem published_at| dispatcher
+    dispatcher -->|Publish + confirmação| queue
+    dispatcher -->|marca published_at| outbox
     queue --> workers
     workers --> processor
-
-    client -->|GET /health| api
-    api --> health
-    health --> healthResponse[status, queueLength, queueCapacity]
-
-    client -->|GET /metrics| api
-    api --> metrics
-    metrics --> metricsResponse[eventsQueued, eventsProcessed, retries, failures]
-
-    client -->|GET /dead-letters| api
-    api --> deadletters
-    deadletters --> deadLetterResponse[evento, erro, tentativas, data da falha]
+    processor -->|processed ou failed| events
 ```
 
-## Fluxo de inicialização e recuperação
+## Garantia transacional
+
+O registro em `events` e a mensagem em `outbox` são inseridos na mesma transação SQLite. Ou ambos são confirmados, ou nenhum deles é persistido. Assim, uma falha entre o banco e o RabbitMQ não perde a intenção de publicação.
+
+O dispatcher executa continuamente:
+
+1. Busca um lote de mensagens com `published_at IS NULL`.
+2. Publica cada evento pela interface `EventPublisher`.
+3. Aguarda a confirmação do provider.
+4. Marca a mensagem como publicada.
+5. Em caso de falha, incrementa `attempts`, registra `last_error` e tenta novamente em outro ciclo.
+
+## Semântica de entrega
+
+A garantia é `at-least-once`. Se o processo cair depois de o broker confirmar a publicação e antes de o SQLite gravar `published_at`, a mensagem continuará pendente e poderá ser publicada novamente. Por isso, consumidores precisam tratar `event.id` de forma idempotente.
+
+A implementação atual possui um dispatcher por instância. Para executar várias réplicas simultâneas, uma evolução deverá adicionar reivindicação de mensagens ou locking apropriado ao banco usado em produção.
+
+## Inicialização
 
 ```mermaid
 flowchart TD
     start[Aplicação inicia]
-    database[Abre o SQLite]
-    workers[Inicia os workers]
-    pending[Consulta eventos com status queued]
-    restore[Recoloca eventos na fila interna]
-    server[Disponibiliza o servidor HTTP]
+    migrate[Abre e migra o SQLite]
+    queue[Conecta à EventQueue]
+    workers[Inicia workers]
+    dispatcher[Inicia OutboxDispatcher]
+    pending[Busca mensagens pendentes]
+    server[Disponibiliza HTTP]
 
-    start --> database
-    database --> workers
-    workers --> pending
-    pending --> restore
-    restore --> server
-```
-## Fluxo de configuração
-
-```mermaid
-flowchart TD
-    env[Variáveis de ambiente]
-    defaults[Valores padrão]
-    config[LoadConfig]
-    app[NewApp]
-    server[Servidor HTTP]
-    queue[Fila interna]
-    workers[Workers]
-
-    env --> config
-    defaults --> config
-    config --> app
-    config --> server
-    config --> workers
-    app --> queue
+    start --> migrate --> queue --> workers --> dispatcher
+    dispatcher --> pending
+    dispatcher --> server
 ```
 
-## Fluxo de encerramento gracioso
+A migração cria a tabela `outbox` e também gera mensagens para eventos antigos que ainda estejam com status `queued`.
+
+## Encerramento gracioso
 
 ```mermaid
 sequenceDiagram
     participant OS as Sistema operacional
-    participant Main as main.go
     participant HTTP as Servidor HTTP
-    participant Queue as Fila de eventos
+    participant Outbox as OutboxDispatcher
+    participant Queue as EventQueue
     participant Workers as Workers
 
-    OS->>Main: SIGINT / SIGTERM
-    Main->>HTTP: Shutdown com timeout
-    HTTP-->>Main: Para de aceitar novas requisições
-    Main->>Queue: StopConsuming
-    Queue-->>Workers: Não há novos eventos
-    Workers-->>Workers: Finalizam eventos em andamento
-    Workers-->>Main: WaitGroup concluído
-    Main->>Queue: Close
-    Main-->>OS: Processo encerrado com segurança
+    OS->>HTTP: SIGINT ou SIGTERM
+    HTTP-->>OS: Para de aceitar requisições
+    OS->>Outbox: Cancel
+    Outbox-->>OS: Dispatcher finalizado
+    OS->>Queue: StopConsuming
+    Queue-->>Workers: Não há novas entregas
+    Workers-->>OS: Processamento em andamento concluído
+    OS->>Queue: Close
 ```
 
-## Explicação rápida
-
-1. Um sistema externo envia `POST /events`.
-2. O handler valida o JSON e os campos obrigatórios.
-3. Se o evento for válido, a aplicação tenta persistir o `event.id` no SQLite.
-4. A chave primária do banco rejeita IDs já existentes; eventos duplicados recebem `409 Conflict` e não entram na fila.
-5. Eventos novos são persistidos no SQLite com status `queued`.
-6. Depois de persistidos, entram na fila interna `chan Event`.
-7. A API responde `202 Accepted` rapidamente.
-8. Os workers, rodando em goroutines, consomem a fila e processam os eventos em paralelo.
-9. Se o processamento falhar, o worker aplica retry com backoff antes de registrar falha permanente.
-10. Eventos com falha permanente entram na dead-letter queue em memória para investigação.
-11. A aplicação atualiza métricas em memória para eventos enfileirados, rejeitados, processados, retentados e com falha permanente.
-12. A aplicação registra logs estruturados com campos como `event_id`, `event_type` e `worker_id`.
-13. O endpoint `GET /health` mostra o estado básico da aplicação e da fila.
-14. Com a fila em memória, eventos que permaneceram como `queued` são recuperados do SQLite antes da abertura do servidor HTTP.
-15. Quando a aplicação recebe `Ctrl+C` ou `SIGTERM`, ela executa shutdown gracioso.
-
-## Infraestrutura Docker Compose
-
-O Compose provisiona o serviço Go e um RabbitMQ persistente com health check. `QUEUE_PROVIDER` seleciona `MemoryEventQueue` ou `RabbitMQEventQueue` durante a inicialização.
+## Componentes
 
 ```text
-webhook-processor -------- conexão AMQP -------> rabbitmq:5672
-navegador --------------------------------> rabbitmq:15672
-```
-## Componentes atuais
-
-```text
-Cliente externo -> HTTP server -> handler -> validação -> SQLite/idempotência -> fila interna -> workers -> retry/backoff -> processamento
+Cliente -> HTTP -> SQLite (events + outbox) -> dispatcher -> EventQueue -> workers -> processamento
 ```
 
-A aplicação depende da interface `EventQueue`. `MemoryEventQueue` usa `chan EventDelivery`; `RabbitMQEventQueue` usa fila durável, mensagens persistentes, publisher confirms, prefetch e ACK manual. Handlers e workers permanecem independentes dos detalhes AMQP.
-
-
-No modo RabbitMQ, a aplicação não republica automaticamente os registros `queued` do SQLite durante a inicialização, pois o broker já preserva as mensagens não confirmadas. Ainda existe uma janela entre salvar o evento no SQLite e publicá-lo no RabbitMQ. O próximo passo arquitetural é aplicar o padrão Transactional Outbox para eliminar essa lacuna sem gerar duplicidades.
+- `handlers.go`: valida e persiste a transação.
+- `event_store.go`: mantém eventos e mensagens Outbox.
+- `outbox.go`: publica mensagens pendentes.
+- `queue.go`: define contratos independentes do provider.
+- `rabbitmq_queue.go`: implementa publicação confirmada e consumo com ACK manual.
+- `worker.go`: processa eventos, aplica retry e atualiza o status.

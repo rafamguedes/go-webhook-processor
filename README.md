@@ -2,11 +2,11 @@
 
 Serviço HTTP em Go para recebimento e processamento assíncrono de eventos via webhook.
 
-A aplicação foi desenhada para um cenário comum de backend: receber eventos de sistemas externos, validar o payload, persistir o evento, responder rapidamente ao cliente e processar o trabalho em segundo plano usando uma fila interna com workers concorrentes.
+A aplicação foi desenhada para um cenário comum de backend: receber eventos de sistemas externos, validar o payload, persistir o evento e sua intenção de publicação na mesma transação, responder rapidamente ao cliente e processar o trabalho em segundo plano usando workers concorrentes.
 
 ## Objetivo
 
-Este serviço evita bloquear requisições HTTP enquanto tarefas potencialmente demoradas são executadas. O endpoint `POST /events` valida, deduplica, persiste e enfileira o evento. O processamento ocorre de forma assíncrona por workers em goroutines.
+Este serviço evita bloquear requisições HTTP enquanto tarefas potencialmente demoradas são executadas. O endpoint `POST /events` valida, deduplica e persiste atomicamente o evento com uma mensagem de Outbox. Um dispatcher publica essa mensagem na fila de forma assíncrona. O processamento ocorre de forma assíncrona por workers em goroutines.
 
 Esse padrão é útil para:
 
@@ -23,10 +23,11 @@ Esse padrão é útil para:
 Cliente externo
   -> POST /events
     -> validação do JSON
-      -> persistência em SQLite como queued e deduplicação por event.id
-          -> envio para a fila interna
-            -> resposta HTTP 202 Accepted
-              -> workers processam eventos em background com retry/backoff
+      -> transação SQLite: events + outbox
+        -> resposta HTTP 202 Accepted
+          -> dispatcher lê mensagens pendentes
+            -> EventQueue (memória ou RabbitMQ)
+              -> workers processam com retry/backoff
                 -> atualização do status para processed ou failed
 ```
 
@@ -74,7 +75,7 @@ Recebe um evento para processamento assíncrono.
 Possíveis respostas:
 
 ```text
-202 Accepted            evento validado, persistido e enfileirado
+202 Accepted            evento e mensagem de Outbox persistidos atomicamente
 400 Bad Request         JSON inválido ou campos obrigatórios ausentes
 409 Conflict            event.id duplicado ou já persistido
 503 Service Unavailable fila interna cheia
@@ -90,10 +91,11 @@ app.go              estado da aplicação, dependências e registro das rotas
 queue.go            contrato EventQueue e implementação em memória
 models.go           contratos de entrada e saída usados pela API
 metrics.go          contadores thread-safe e snapshot de métricas
-event_store.go      persistência SQLite, estados e idempotência por event.id
+event_store.go      persistência SQLite, estados, idempotência e tabela Outbox
 deadletter.go       armazenamento em memória dos eventos com falha permanente
-handlers.go         handlers HTTP, validação, métricas e respostas JSON
-worker.go           recuperação, workers, retry e backoff do processamento assíncrono
+handlers.go         handlers HTTP, validação, persistência e respostas JSON
+outbox.go          dispatcher de mensagens pendentes para a EventQueue
+worker.go           workers, retry e backoff do processamento assíncrono
 *_test.go           testes automatizados
 .env.example        exemplo de variáveis de ambiente
 Dockerfile          build de imagem containerizada
@@ -175,13 +177,15 @@ Isso evita processamento duplicado em cenários comuns de webhook, nos quais o s
 
 A deduplicação é persistente: a chave primária `events.id` no SQLite impede que o mesmo evento seja aceito novamente, inclusive após a reinicialização da aplicação.
 
-Na inicialização, a aplicação consulta os eventos com status `queued` e os recoloca na fila interna antes de disponibilizar o servidor HTTP. Eventos já marcados como `processed` ou `failed` não são recuperados.
+Cada evento novo também gera uma linha na tabela `outbox`, dentro da mesma transação. O dispatcher consulta registros cujo `published_at` está vazio, publica-os e só então registra a data de publicação. Mensagens pendentes sobrevivem à reinicialização da aplicação.
+
+A entrega é `at-least-once`: uma falha depois da publicação e antes da atualização de `published_at` pode causar republicação. Consumidores devem permanecer idempotentes.
 
 ## Concorrência
 
 A aplicação depende do contrato `EventQueue`, não diretamente de um channel. Esse contrato combina interfaces menores: `EventPublisher`, usada para publicar, e `EventConsumer`, usada pelos workers para consumir. A implementação atual, `MemoryEventQueue`, encapsula um `chan Event`.
 
-`TryPublish` é usado pelo endpoint HTTP e retorna imediatamente quando não há espaço, permitindo responder `503 Service Unavailable`. `Publish` aguarda espaço ou cancelamento do contexto e é usado na recuperação para não descartar eventos persistidos. `Events`, `Stats` e `Close` completam o ciclo de consumo, observabilidade e encerramento.
+O handler HTTP não publica diretamente. O `OutboxDispatcher` usa `Publish` e mantém a mensagem pendente quando a publicação falha. `Events`, `Stats`, `StopConsuming` e `Close` completam o ciclo de consumo, observabilidade e encerramento.
 
 A quantidade de workers e a capacidade do buffer local são configuradas por `WORKER_COUNT` e `QUEUE_SIZE`. Com RabbitMQ, as estatísticas HTTP representam esse buffer local; a quantidade total de mensagens no broker deve ser acompanhada pelo painel de gerenciamento.
 
@@ -215,7 +219,8 @@ Ao receber o sinal, o serviço:
 
 - para de aceitar novas requisições HTTP
 - aguarda o servidor HTTP encerrar dentro do timeout configurado
-- fecha a fila interna de eventos
+- interrompe o dispatcher do Outbox
+- interrompe o consumo da fila de eventos
 - espera os workers terminarem os eventos já retirados da fila
 - registra `shutdown complete` ao final do processo
 

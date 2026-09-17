@@ -56,7 +56,7 @@ func (app App) createEventHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := app.eventStore.SaveQueued(r.Context(), event); err != nil {
+	if err := app.eventStore.SaveQueuedWithOutbox(r.Context(), event); err != nil {
 		app.metrics.IncEventsRejected()
 		if errors.Is(err, ErrEventAlreadyExists) {
 			app.metrics.IncEventsDuplicated()
@@ -65,33 +65,12 @@ func (app App) createEventHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		slog.Error("failed to persist event", "event_id", event.ID, "event_type", event.Type, "error", err)
+		slog.Error("failed to persist event and outbox message", "event_id", event.ID, "event_type", event.Type, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to persist event")
 		return
 	}
 
-	if err := app.eventQueue.TryPublish(r.Context(), event); err != nil {
-		app.metrics.IncEventsRejected()
-		if errors.Is(err, ErrEventQueueFull) {
-			markErr := app.eventStore.MarkFailed(r.Context(), event.ID, 0, err)
-			if markErr != nil {
-				slog.Error("mark event failed after full queue", "event_id", event.ID, "error", markErr)
-			}
-			queueStats := app.eventQueue.Stats()
-			slog.Warn("event queue is full", "event_id", event.ID, "event_type", event.Type, "queue_capacity", queueStats.Capacity)
-			writeError(w, http.StatusServiceUnavailable, "event queue is full")
-			return
-		}
-
-		slog.Error("publish event failed", "event_id", event.ID, "event_type", event.Type, "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to queue event")
-		return
-	}
-
-	app.metrics.IncEventsQueued()
-	queueStats := app.eventQueue.Stats()
-	slog.Info("event queued", "event_id", event.ID, "event_type", event.Type, "queue_length", queueStats.Length, "queue_capacity", queueStats.Capacity)
-
+	slog.Info("event accepted into outbox", "event_id", event.ID, "event_type", event.Type)
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"accepted": true,
 		"eventId":  event.ID,

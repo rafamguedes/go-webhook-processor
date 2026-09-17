@@ -1,59 +1,10 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
 )
-
-func TestRecoverQueuedEventsRestoresOnlyPendingEvents(t *testing.T) {
-	eventStore := newTestEventStore(t)
-	processedEvent := testEvent()
-	queuedEvent := Event{
-		ID:      "evt-002",
-		Type:    "order.created",
-		Payload: map[string]any{"orderId": "ord-123"},
-	}
-
-	if err := eventStore.SaveQueued(t.Context(), processedEvent); err != nil {
-		t.Fatalf("failed to save processed event: %v", err)
-	}
-	if err := eventStore.MarkProcessed(t.Context(), processedEvent.ID, 1); err != nil {
-		t.Fatalf("failed to mark event processed: %v", err)
-	}
-	if err := eventStore.SaveQueued(t.Context(), queuedEvent); err != nil {
-		t.Fatalf("failed to save queued event: %v", err)
-	}
-
-	eventQueue := NewMemoryEventQueue(2)
-	metrics := NewMetrics()
-	recovered, err := recoverQueuedEvents(context.Background(), eventQueue, metrics, eventStore)
-	if err != nil {
-		t.Fatalf("failed to recover queued events: %v", err)
-	}
-
-	if recovered != 1 {
-		t.Fatalf("expected 1 recovered event, got %d", recovered)
-	}
-	queueStats := eventQueue.Stats()
-	if queueStats.Length != 1 {
-		t.Fatalf("expected queue length 1, got %d", queueStats.Length)
-	}
-
-	event := (<-eventQueue.Events()).Event
-	if event.ID != queuedEvent.ID {
-		t.Fatalf("expected recovered event %s, got %s", queuedEvent.ID, event.ID)
-	}
-	if event.Payload["orderId"] != "ord-123" {
-		t.Fatalf("expected recovered payload orderId ord-123, got %v", event.Payload["orderId"])
-	}
-
-	snapshot := metrics.Snapshot(queueStats.Length, queueStats.Capacity)
-	if snapshot.EventsQueued != 1 {
-		t.Fatalf("expected 1 queued event in metrics, got %d", snapshot.EventsQueued)
-	}
-}
 
 func TestProcessEventWithRetrySucceedsAfterFailure(t *testing.T) {
 	config := testConfig()
@@ -63,7 +14,7 @@ func TestProcessEventWithRetrySucceedsAfterFailure(t *testing.T) {
 	deadLetters := NewDeadLetterStore(config.DeadLetterCapacity)
 	eventStore := newTestEventStore(t)
 	event := testEvent()
-	if err := eventStore.SaveQueued(t.Context(), event); err != nil {
+	if err := eventStore.SaveQueuedWithOutbox(t.Context(), event); err != nil {
 		t.Fatalf("failed to save queued event: %v", err)
 	}
 
@@ -118,7 +69,7 @@ func TestProcessEventWithRetryFailsPermanently(t *testing.T) {
 	deadLetters := NewDeadLetterStore(config.DeadLetterCapacity)
 	eventStore := newTestEventStore(t)
 	event := testEvent()
-	if err := eventStore.SaveQueued(t.Context(), event); err != nil {
+	if err := eventStore.SaveQueuedWithOutbox(t.Context(), event); err != nil {
 		t.Fatalf("failed to save queued event: %v", err)
 	}
 
