@@ -28,6 +28,8 @@ type Config struct {
 	QueueProvider            string
 	RabbitMQURL              string
 	RabbitMQQueue            string
+	RabbitMQReconnectMs      int
+	RabbitMQConnectTimeoutMs int
 	OutboxPollIntervalMs     int
 	OutboxBatchSize          int
 }
@@ -47,6 +49,8 @@ func LoadConfig() (Config, error) {
 		QueueProvider:            getEnv("QUEUE_PROVIDER", QueueProviderMemory),
 		RabbitMQURL:              getEnv("RABBITMQ_URL", "amqp://webhook:webhook_dev@localhost:5672/"),
 		RabbitMQQueue:            getEnv("RABBITMQ_QUEUE", "webhook.events"),
+		RabbitMQReconnectMs:      getEnvAsInt("RABBITMQ_RECONNECT_MS", 1000),
+		RabbitMQConnectTimeoutMs: getEnvAsInt("RABBITMQ_CONNECT_TIMEOUT_MS", 5000),
 		OutboxPollIntervalMs:     getEnvAsInt("OUTBOX_POLL_INTERVAL_MS", 500),
 		OutboxBatchSize:          getEnvAsInt("OUTBOX_BATCH_SIZE", 100),
 	}
@@ -87,6 +91,13 @@ func LoadConfig() (Config, error) {
 		return Config{}, fmt.Errorf("DATABASE_PATH is required")
 	}
 
+	if config.RabbitMQReconnectMs <= 0 {
+		return Config{}, fmt.Errorf("RABBITMQ_RECONNECT_MS must be greater than zero")
+	}
+
+	if config.RabbitMQConnectTimeoutMs <= 0 {
+		return Config{}, fmt.Errorf("RABBITMQ_CONNECT_TIMEOUT_MS must be greater than zero")
+	}
 	if config.OutboxPollIntervalMs <= 0 {
 		return Config{}, fmt.Errorf("OUTBOX_POLL_INTERVAL_MS must be greater than zero")
 	}
@@ -125,6 +136,13 @@ func (config Config) ShutdownTimeout() time.Duration {
 	return time.Duration(config.ShutdownTimeoutSeconds) * time.Second
 }
 
+func (config Config) RabbitMQReconnectInterval() time.Duration {
+	return time.Duration(config.RabbitMQReconnectMs) * time.Millisecond
+}
+
+func (config Config) RabbitMQConnectTimeout() time.Duration {
+	return time.Duration(config.RabbitMQConnectTimeoutMs) * time.Millisecond
+}
 func (config Config) OutboxPollInterval() time.Duration {
 	return time.Duration(config.OutboxPollIntervalMs) * time.Millisecond
 }

@@ -63,7 +63,7 @@ func (dispatcher *OutboxDispatcher) DispatchPending(ctx context.Context) error {
 				slog.Error("mark outbox publish failure failed", "outbox_id", message.ID, "event_id", message.Event.ID, "error", markErr)
 			}
 			slog.Warn("outbox message publish failed", "outbox_id", message.ID, "event_id", message.Event.ID, "error", err)
-			continue
+			break
 		}
 
 		if err := dispatcher.store.MarkOutboxPublished(ctx, message.ID); err != nil {

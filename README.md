@@ -121,6 +121,8 @@ DATABASE_PATH=./events.db
 QUEUE_PROVIDER=memory
 RABBITMQ_URL=amqp://webhook:webhook_dev@localhost:5672/
 RABBITMQ_QUEUE=webhook.events
+RABBITMQ_RECONNECT_MS=1000
+RABBITMQ_CONNECT_TIMEOUT_MS=5000
 ```
 
 Descrição das variáveis:
@@ -139,6 +141,8 @@ DATABASE_PATH                 caminho do arquivo SQLite usado para persistir eve
 QUEUE_PROVIDER                implementação da fila: memory ou rabbitmq
 RABBITMQ_URL                  endereço AMQP usado quando o provider for rabbitmq
 RABBITMQ_QUEUE                nome da fila durável no RabbitMQ
+RABBITMQ_RECONNECT_MS         espera entre tentativas de reconexão do consumidor
+RABBITMQ_CONNECT_TIMEOUT_MS   timeout para cada tentativa de conexão AMQP
 ```
 
 ## Persistência
@@ -190,6 +194,8 @@ O handler HTTP não publica diretamente. O `OutboxDispatcher` usa `Publish` e ma
 A quantidade de workers e a capacidade do buffer local são configuradas por `WORKER_COUNT` e `QUEUE_SIZE`. Com RabbitMQ, as estatísticas HTTP representam esse buffer local; a quantidade total de mensagens no broker deve ser acompanhada pelo painel de gerenciamento.
 
 O consumidor RabbitMQ usa ACK manual. Se o processo cair antes do ACK, a entrega permanece não confirmada e o broker pode reenviá-la. Mensagens inválidas são rejeitadas sem requeue; eventos processados ou enviados para o fluxo de falha permanente são confirmados pelo worker.
+
+Publisher e consumer refazem suas conexões automaticamente. A aplicação pode iniciar com o broker indisponível; enquanto ele estiver fora, eventos novos permanecem pendentes no Outbox e são publicados depois da reconexão.
 
 ## Retry com backoff
 

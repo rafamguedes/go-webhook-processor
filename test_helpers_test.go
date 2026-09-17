@@ -48,6 +48,8 @@ func testConfig() Config {
 		DeadLetterCapacity:       100,
 		DatabasePath:             "./events-test.db",
 		QueueProvider:            QueueProviderMemory,
+		RabbitMQReconnectMs:      50,
+		RabbitMQConnectTimeoutMs: 500,
 		OutboxPollIntervalMs:     10,
 		OutboxBatchSize:          100,
 	}

@@ -98,4 +98,8 @@ Cliente -> HTTP -> SQLite (events + outbox) -> dispatcher -> EventQueue -> worke
 - `outbox.go`: publica mensagens pendentes.
 - `queue.go`: define contratos independentes do provider.
 - `rabbitmq_queue.go`: implementa publicação confirmada e consumo com ACK manual.
+
+## Reconexão RabbitMQ
+
+O publisher cria uma conexão sob demanda e a invalida quando uma publicação ou confirmação falha. A tentativa seguinte cria uma nova sessão. O consumer mantém um loop próprio: quando a conexão fecha inesperadamente, aguarda `RABBITMQ_RECONNECT_MS` e conecta novamente. A inicialização da aplicação não exige que o broker já esteja disponível; o Outbox mantém as mensagens pendentes durante a indisponibilidade.
 - `worker.go`: processa eventos, aplica retry e atualiza o status.
