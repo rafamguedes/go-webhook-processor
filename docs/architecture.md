@@ -85,16 +85,17 @@ sequenceDiagram
     participant OS as Sistema operacional
     participant Main as main.go
     participant HTTP as Servidor HTTP
-    participant Queue as Fila interna
+    participant Queue as Fila de eventos
     participant Workers as Workers
 
     OS->>Main: SIGINT / SIGTERM
     Main->>HTTP: Shutdown com timeout
     HTTP-->>Main: Para de aceitar novas requisições
-    Main->>Queue: close(eventQueue)
+    Main->>Queue: StopConsuming
     Queue-->>Workers: Não há novos eventos
     Workers-->>Workers: Finalizam eventos em andamento
     Workers-->>Main: WaitGroup concluído
+    Main->>Queue: Close
     Main-->>OS: Processo encerrado com segurança
 ```
 
@@ -113,15 +114,15 @@ sequenceDiagram
 11. A aplicação atualiza métricas em memória para eventos enfileirados, rejeitados, processados, retentados e com falha permanente.
 12. A aplicação registra logs estruturados com campos como `event_id`, `event_type` e `worker_id`.
 13. O endpoint `GET /health` mostra o estado básico da aplicação e da fila.
-14. Na inicialização, eventos que permaneceram como `queued` são recuperados do SQLite antes da abertura do servidor HTTP.
+14. Com a fila em memória, eventos que permaneceram como `queued` são recuperados do SQLite antes da abertura do servidor HTTP.
 15. Quando a aplicação recebe `Ctrl+C` ou `SIGTERM`, ela executa shutdown gracioso.
 
 ## Infraestrutura Docker Compose
 
-O Compose provisiona o serviço Go e um RabbitMQ persistente com health check. Nesta etapa, a aplicação continua usando `MemoryEventQueue`; a conexão indicada abaixo será implementada pelo futuro adaptador `RabbitMQEventQueue`.
+O Compose provisiona o serviço Go e um RabbitMQ persistente com health check. `QUEUE_PROVIDER` seleciona `MemoryEventQueue` ou `RabbitMQEventQueue` durante a inicialização.
 
 ```text
-webhook-processor -- futura conexão AMQP --> rabbitmq:5672
+webhook-processor -------- conexão AMQP -------> rabbitmq:5672
 navegador --------------------------------> rabbitmq:15672
 ```
 ## Componentes atuais
@@ -130,4 +131,7 @@ navegador --------------------------------> rabbitmq:15672
 Cliente externo -> HTTP server -> handler -> validação -> SQLite/idempotência -> fila interna -> workers -> retry/backoff -> processamento
 ```
 
-A aplicação depende da interface `EventQueue`. A implementação atual é `MemoryEventQueue`, baseada em `chan Event`; uma implementação externa poderá cumprir o mesmo contrato usando RabbitMQ, Kafka, SQS ou Redis Streams, sem fazer handlers e workers conhecerem os detalhes de conexão.
+A aplicação depende da interface `EventQueue`. `MemoryEventQueue` usa `chan EventDelivery`; `RabbitMQEventQueue` usa fila durável, mensagens persistentes, publisher confirms, prefetch e ACK manual. Handlers e workers permanecem independentes dos detalhes AMQP.
+
+
+No modo RabbitMQ, a aplicação não republica automaticamente os registros `queued` do SQLite durante a inicialização, pois o broker já preserva as mensagens não confirmadas. Ainda existe uma janela entre salvar o evento no SQLite e publicá-lo no RabbitMQ. O próximo passo arquitetural é aplicar o padrão Transactional Outbox para eliminar essa lacuna sem gerar duplicidades.

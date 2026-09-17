@@ -121,7 +121,7 @@ func TestCreateEventHandlerQueuesValidEvent(t *testing.T) {
 		t.Fatalf("expected queue length 1, got %d", queueStats.Length)
 	}
 
-	event := <-app.eventQueue.Events()
+	event := (<-app.eventQueue.Events()).Event
 	if event.ID != "evt-001" {
 		t.Fatalf("expected event id evt-001, got %s", event.ID)
 	}

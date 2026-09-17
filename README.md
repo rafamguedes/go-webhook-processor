@@ -183,7 +183,9 @@ A aplicação depende do contrato `EventQueue`, não diretamente de um channel. 
 
 `TryPublish` é usado pelo endpoint HTTP e retorna imediatamente quando não há espaço, permitindo responder `503 Service Unavailable`. `Publish` aguarda espaço ou cancelamento do contexto e é usado na recuperação para não descartar eventos persistidos. `Events`, `Stats` e `Close` completam o ciclo de consumo, observabilidade e encerramento.
 
-A quantidade de workers e a capacidade da fila em memória são configuradas por `WORKER_COUNT` e `QUEUE_SIZE`.
+A quantidade de workers e a capacidade do buffer local são configuradas por `WORKER_COUNT` e `QUEUE_SIZE`. Com RabbitMQ, as estatísticas HTTP representam esse buffer local; a quantidade total de mensagens no broker deve ser acompanhada pelo painel de gerenciamento.
+
+O consumidor RabbitMQ usa ACK manual. Se o processo cair antes do ACK, a entrega permanece não confirmada e o broker pode reenviá-la. Mensagens inválidas são rejeitadas sem requeue; eventos processados ou enviados para o fluxo de falha permanente são confirmados pelo worker.
 
 ## Retry com backoff
 
@@ -246,7 +248,7 @@ RabbitMQ AMQP        localhost:5672
 RabbitMQ Management  http://localhost:15672
 ```
 
-Enquanto o adaptador `RabbitMQEventQueue` não estiver implementado, mantenha `QUEUE_PROVIDER=memory`. Selecionar `rabbitmq` encerra a aplicação explicitamente, evitando uso silencioso da fila errada.
+Use `QUEUE_PROVIDER=memory` para a fila local ou `QUEUE_PROVIDER=rabbitmq` para publicar e consumir pelo broker. O adaptador declara uma fila durável, publica mensagens persistentes com confirmação do broker e usa ACK manual após o processamento.
 
 Build isolado da imagem:
 

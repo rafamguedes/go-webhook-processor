@@ -61,12 +61,12 @@ func TestNewConfiguredEventQueueCreatesMemoryQueue(t *testing.T) {
 	}
 }
 
-func TestNewConfiguredEventQueueRejectsRabbitMQUntilAdapterExists(t *testing.T) {
+func TestNewConfiguredEventQueueRejectsUnsupportedProvider(t *testing.T) {
 	config := testConfig()
-	config.QueueProvider = QueueProviderRabbitMQ
+	config.QueueProvider = "unsupported"
 
 	_, err := NewConfiguredEventQueue(config)
 	if err == nil {
-		t.Fatal("expected rabbitmq provider to be rejected until adapter exists")
+		t.Fatal("expected unsupported provider to be rejected")
 	}
 }

@@ -41,7 +41,7 @@ func TestRecoverQueuedEventsRestoresOnlyPendingEvents(t *testing.T) {
 		t.Fatalf("expected queue length 1, got %d", queueStats.Length)
 	}
 
-	event := <-eventQueue.Events()
+	event := (<-eventQueue.Events()).Event
 	if event.ID != queuedEvent.ID {
 		t.Fatalf("expected recovered event %s, got %s", queuedEvent.ID, event.ID)
 	}

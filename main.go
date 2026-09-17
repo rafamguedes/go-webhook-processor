@@ -37,16 +37,23 @@ func main() {
 	var workers sync.WaitGroup
 	startWorkers(config.WorkerCount, app.eventQueue, &workers, config, app.metrics, app.deadLetters, app.eventStore)
 
-	recoveredEvents, err := recoverQueuedEvents(context.Background(), app.eventQueue, app.metrics, app.eventStore)
-	if err != nil {
-		slog.Error("recover queued events failed", "error", err)
-		if closeErr := app.eventQueue.Close(); closeErr != nil {
-			slog.Error("close event queue failed", "error", closeErr)
+	if config.QueueProvider == QueueProviderMemory {
+		recoveredEvents, err := recoverQueuedEvents(context.Background(), app.eventQueue, app.metrics, app.eventStore)
+		if err != nil {
+			slog.Error("recover queued events failed", "error", err)
+			if stopErr := app.eventQueue.StopConsuming(); stopErr != nil {
+				slog.Error("stop event consumption failed", "error", stopErr)
+			}
+			workers.Wait()
+			if closeErr := app.eventQueue.Close(); closeErr != nil {
+				slog.Error("close event queue failed", "error", closeErr)
+			}
+			os.Exit(1)
 		}
-		workers.Wait()
-		os.Exit(1)
+		slog.Info("queued events recovered", "count", recoveredEvents)
+	} else {
+		slog.Info("database queue recovery skipped", "provider", config.QueueProvider)
 	}
-	slog.Info("queued events recovered", "count", recoveredEvents)
 
 	server := &http.Server{
 		Addr:              config.ServerAddress(),
@@ -80,10 +87,13 @@ func main() {
 		slog.Error("server shutdown error", "error", err)
 	}
 
+	if err := app.eventQueue.StopConsuming(); err != nil {
+		slog.Error("stop event consumption failed", "error", err)
+	}
+	workers.Wait()
 	if err := app.eventQueue.Close(); err != nil {
 		slog.Error("close event queue failed", "error", err)
 	}
-	workers.Wait()
 
 	slog.Info("shutdown complete")
 }

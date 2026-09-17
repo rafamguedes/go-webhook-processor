@@ -36,8 +36,12 @@ func startWorkers(count int, eventQueue EventConsumer, workers *sync.WaitGroup, 
 func worker(workerID int, eventQueue EventConsumer, workers *sync.WaitGroup, config Config, metrics *Metrics, deadLetters *DeadLetterStore, eventStore *EventStore) {
 	defer workers.Done()
 
-	for event := range eventQueue.Events() {
+	for delivery := range eventQueue.Events() {
+		event := delivery.Event
 		processEventWithRetry(workerID, event, config, processEvent, time.Sleep, metrics, deadLetters, eventStore)
+		if err := delivery.Ack(); err != nil {
+			slog.Error("acknowledge event failed", "worker_id", workerID, "event_id", event.ID, "error", err)
+		}
 	}
 
 	slog.Info("worker stopped", "worker_id", workerID)
