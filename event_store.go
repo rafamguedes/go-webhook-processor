@@ -95,10 +95,10 @@ func (store *EventStore) SaveQueuedWithOutbox(ctx context.Context, event Event) 
 
 	now := time.Now().UTC()
 	result, err := tx.ExecContext(ctx, store.bind(`
-		INSERT INTO events (id, type, payload, status, attempts, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO events (id, type, request_id, payload, status, attempts, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO NOTHING
-	`), event.ID, event.Type, string(payload), EventStatusQueued, 0, now, now)
+	`), event.ID, event.Type, event.RequestID, string(payload), EventStatusQueued, 0, now, now)
 	if err != nil {
 		return fmt.Errorf("save queued event: %w", err)
 	}
@@ -112,9 +112,9 @@ func (store *EventStore) SaveQueuedWithOutbox(ctx context.Context, event Event) 
 	}
 
 	_, err = tx.ExecContext(ctx, store.bind(`
-		INSERT INTO outbox (event_id, event_type, payload, attempts, created_at)
-		VALUES (?, ?, ?, 0, ?)
-	`), event.ID, event.Type, string(payload), now)
+		INSERT INTO outbox (event_id, event_type, request_id, payload, attempts, created_at)
+		VALUES (?, ?, ?, ?, 0, ?)
+	`), event.ID, event.Type, event.RequestID, string(payload), now)
 	if err != nil {
 		return fmt.Errorf("save outbox message: %w", err)
 	}
@@ -153,7 +153,7 @@ func (store *EventStore) ClaimPendingOutbox(ctx context.Context, limit int, leas
 		SET dispatch_token = ?, dispatching_at = ?
 		FROM candidates
 		WHERE outbox.id = candidates.id
-		RETURNING outbox.id, outbox.event_id, outbox.event_type, outbox.payload, outbox.attempts, outbox.dispatch_token
+		RETURNING outbox.id, outbox.event_id, outbox.event_type, outbox.request_id, outbox.payload, outbox.attempts, outbox.dispatch_token
 	`), now.Add(-leaseDuration), limit, dispatchToken, now)
 	if err != nil {
 		return nil, fmt.Errorf("claim pending outbox messages: %w", err)
@@ -164,7 +164,7 @@ func (store *EventStore) ClaimPendingOutbox(ctx context.Context, limit int, leas
 	for rows.Next() {
 		var message OutboxMessage
 		var payload string
-		if err := rows.Scan(&message.ID, &message.Event.ID, &message.Event.Type, &payload, &message.Attempts, &message.DispatchToken); err != nil {
+		if err := rows.Scan(&message.ID, &message.Event.ID, &message.Event.Type, &message.Event.RequestID, &payload, &message.Attempts, &message.DispatchToken); err != nil {
 			return nil, fmt.Errorf("scan claimed outbox message: %w", err)
 		}
 		if err := json.Unmarshal([]byte(payload), &message.Event.Payload); err != nil {
@@ -180,7 +180,7 @@ func (store *EventStore) ClaimPendingOutbox(ctx context.Context, limit int, leas
 
 func (store *EventStore) ListPendingOutbox(ctx context.Context, limit int) ([]OutboxMessage, error) {
 	rows, err := store.db.QueryContext(ctx, store.bind(`
-		SELECT id, event_id, event_type, payload, attempts
+		SELECT id, event_id, event_type, request_id, payload, attempts
 		FROM outbox
 		WHERE published_at IS NULL
 		ORDER BY id ASC
@@ -195,7 +195,7 @@ func (store *EventStore) ListPendingOutbox(ctx context.Context, limit int) ([]Ou
 	for rows.Next() {
 		var message OutboxMessage
 		var payload string
-		if err := rows.Scan(&message.ID, &message.Event.ID, &message.Event.Type, &payload, &message.Attempts); err != nil {
+		if err := rows.Scan(&message.ID, &message.Event.ID, &message.Event.Type, &message.Event.RequestID, &payload, &message.Attempts); err != nil {
 			return nil, fmt.Errorf("scan outbox message: %w", err)
 		}
 		if err := json.Unmarshal([]byte(payload), &message.Event.Payload); err != nil {

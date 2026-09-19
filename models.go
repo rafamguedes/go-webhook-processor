@@ -1,9 +1,10 @@
 package main
 
 type Event struct {
-	ID      string         `json:"id"`
-	Type    string         `json:"type"`
-	Payload map[string]any `json:"payload"`
+	ID        string         `json:"id"`
+	Type      string         `json:"type"`
+	RequestID string         `json:"requestId,omitempty"`
+	Payload   map[string]any `json:"payload"`
 }
 
 type HealthResponse struct {

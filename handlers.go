@@ -131,6 +131,7 @@ func (app App) createEventHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	event.RequestID = r.Header.Get("X-Request-ID")
 	if err := app.eventStore.SaveQueuedWithOutbox(r.Context(), event); err != nil {
 		app.metrics.IncEventsRejected()
 		if errors.Is(err, ErrEventAlreadyExists) {
