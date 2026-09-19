@@ -62,9 +62,9 @@ func (dispatcher *OutboxDispatcher) DispatchPending(ctx context.Context) error {
 	for _, message := range messages {
 		if err := dispatcher.publisher.Publish(ctx, message.Event); err != nil {
 			if markErr := dispatcher.store.MarkOutboxFailed(context.WithoutCancel(ctx), message, err); markErr != nil {
-				slog.Error("mark outbox publish failure failed", "outbox_id", message.ID, "event_id", message.Event.ID, "error", markErr)
+				slog.Error("mark outbox publish failure failed", "outbox_id", message.ID, "event_id", message.Event.ID, "request_id", message.Event.RequestID, "error", markErr)
 			}
-			slog.Warn("outbox message publish failed", "outbox_id", message.ID, "event_id", message.Event.ID, "error", err)
+			slog.Warn("outbox message publish failed", "outbox_id", message.ID, "event_id", message.Event.ID, "request_id", message.Event.RequestID, "error", err)
 			break
 		}
 
@@ -72,7 +72,7 @@ func (dispatcher *OutboxDispatcher) DispatchPending(ctx context.Context) error {
 			return err
 		}
 		dispatcher.metrics.IncEventsQueued()
-		slog.Info("outbox message published", "outbox_id", message.ID, "event_id", message.Event.ID, "event_type", message.Event.Type)
+		slog.Info("outbox message published", "outbox_id", message.ID, "event_id", message.Event.ID, "request_id", message.Event.RequestID, "event_type", message.Event.Type)
 	}
 	return nil
 }
