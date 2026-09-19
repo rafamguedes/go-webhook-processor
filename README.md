@@ -37,6 +37,10 @@ Cliente externo
 
 Retorna o status da aplicação e informações básicas do buffer local de entregas do RabbitMQ.
 
+### GET /ready
+
+Verifica se a aplicação consegue acessar o PostgreSQL. Retorna `200` quando está pronta para receber tráfego e `503` durante indisponibilidade do banco.
+
 ### GET /metrics
 
 Retorna um snapshot dos principais contadores operacionais da aplicação.

@@ -4,6 +4,9 @@
 ### Health check
 GET {{baseUrl}}/health
 
+### Readiness check
+GET {{baseUrl}}/ready
+
 ### Métricas operacionais
 GET {{baseUrl}}/metrics
 

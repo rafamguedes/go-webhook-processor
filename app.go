@@ -23,6 +23,7 @@ func NewApp(config Config, eventStore *EventStore, eventQueue EventQueue) App {
 func (app App) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", app.healthHandler)
+	mux.HandleFunc("GET /ready", app.readinessHandler)
 	mux.HandleFunc("GET /metrics", app.metricsHandler)
 	mux.HandleFunc("GET /dead-letters", app.deadLettersHandler)
 	mux.HandleFunc("POST /internal/dead-letters/{eventID}/replay", app.replayDeadLetterHandler)

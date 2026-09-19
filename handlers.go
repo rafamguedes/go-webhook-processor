@@ -23,6 +23,21 @@ func (app App) healthHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+func (app App) readinessHandler(w http.ResponseWriter, r *http.Request) {
+	if err := app.eventStore.db.PingContext(r.Context()); err != nil {
+		slog.Warn("readiness check failed", "error", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"status": "not_ready",
+			"error":  "database unavailable",
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ready",
+	})
+}
+
 func (app App) metricsHandler(w http.ResponseWriter, r *http.Request) {
 	queueStats := app.eventQueue.Stats()
 	response := app.metrics.Snapshot(queueStats.Length, queueStats.Capacity)
