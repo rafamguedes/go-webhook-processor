@@ -59,6 +59,10 @@ Retorna um snapshot dos principais contadores operacionais da aplicação.
 
 Retorna os eventos que falharam permanentemente após esgotar as tentativas de retry. Este endpoint consulta falhas permanentes persistidas no SQLite, mesmo após a reinicialização da aplicação.
 
+### POST /internal/dead-letters/{event-id}/replay
+
+Reprocessa uma dead letter específica. Exige o header `Authorization: Bearer <DLQ_REPLAY_TOKEN>` e retorna `202 Accepted` quando o evento volta para `queued`.
+
 ### POST /events
 
 Recebe um evento para processamento assíncrono.
@@ -138,6 +142,7 @@ MAX_RETRIES                   quantidade de novas tentativas após a primeira fa
 RETRY_BACKOFF_SECONDS         base em segundos para o backoff entre tentativas
 DEAD_LETTER_CAPACITY          quantidade máxima de eventos retornados na consulta da dead-letter queue
 DATABASE_PATH                 caminho do arquivo SQLite usado para persistir eventos
+DLQ_REPLAY_TOKEN              token Bearer exigido pelo endpoint interno de replay da DLQ
 RABBITMQ_URL                  endereço AMQP do RabbitMQ
 RABBITMQ_QUEUE                nome da fila durável no RabbitMQ
 RABBITMQ_RECONNECT_MS         espera entre tentativas de reconexão do consumidor

@@ -1,10 +1,12 @@
 package main
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -37,6 +39,52 @@ func (app App) deadLettersHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+func (app App) replayDeadLetterHandler(w http.ResponseWriter, r *http.Request) {
+	if app.config.DLQReplayToken == "" {
+		writeError(w, http.StatusServiceUnavailable, "dead letter replay is not configured")
+		return
+	}
+
+	authorization := r.Header.Get("Authorization")
+	const bearerPrefix = "Bearer "
+	providedToken := ""
+	if strings.HasPrefix(authorization, bearerPrefix) {
+		providedToken = strings.TrimSpace(strings.TrimPrefix(authorization, bearerPrefix))
+	}
+	if subtle.ConstantTimeCompare([]byte(providedToken), []byte(app.config.DLQReplayToken)) != 1 {
+		slog.Warn("dead letter replay unauthorized", "event_id", r.PathValue("eventID"))
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	eventID := strings.TrimSpace(r.PathValue("eventID"))
+	if eventID == "" {
+		writeError(w, http.StatusBadRequest, "event id is required")
+		return
+	}
+
+	if err := app.eventStore.ReplayDeadLetter(r.Context(), eventID); err != nil {
+		if errors.Is(err, ErrDeadLetterNotFound) {
+			writeError(w, http.StatusNotFound, "dead letter not found")
+			return
+		}
+		if errors.Is(err, ErrDeadLetterNotFailed) {
+			writeError(w, http.StatusConflict, "event is not failed")
+			return
+		}
+
+		slog.Error("replay dead letter failed", "event_id", eventID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to replay dead letter")
+		return
+	}
+
+	slog.Info("dead letter replay accepted", "event_id", eventID)
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"accepted": true,
+		"eventId":  eventID,
+		"status":   EventStatusQueued,
+	})
+}
 func (app App) createEventHandler(w http.ResponseWriter, r *http.Request) {
 	var event Event
 

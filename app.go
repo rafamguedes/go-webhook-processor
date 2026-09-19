@@ -25,6 +25,7 @@ func (app App) routes() http.Handler {
 	mux.HandleFunc("GET /health", app.healthHandler)
 	mux.HandleFunc("GET /metrics", app.metricsHandler)
 	mux.HandleFunc("GET /dead-letters", app.deadLettersHandler)
+	mux.HandleFunc("POST /internal/dead-letters/{eventID}/replay", app.replayDeadLetterHandler)
 	mux.HandleFunc("POST /events", app.createEventHandler)
 
 	return mux

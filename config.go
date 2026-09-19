@@ -20,6 +20,7 @@ type Config struct {
 	RetryBackoffSeconds      int
 	DeadLetterCapacity       int
 	DatabasePath             string
+	DLQReplayToken           string
 	RabbitMQURL              string
 	RabbitMQQueue            string
 	RabbitMQReconnectMs      int
@@ -42,6 +43,7 @@ func LoadConfig() (Config, error) {
 		RetryBackoffSeconds:      getEnvAsInt("RETRY_BACKOFF_SECONDS", 1),
 		DeadLetterCapacity:       getEnvAsInt("DEAD_LETTER_CAPACITY", 100),
 		DatabasePath:             getEnv("DATABASE_PATH", "./events.db"),
+		DLQReplayToken:           getEnv("DLQ_REPLAY_TOKEN", ""),
 		RabbitMQURL:              getEnv("RABBITMQ_URL", "amqp://webhook:webhook_dev@localhost:5672/"),
 		RabbitMQQueue:            getEnv("RABBITMQ_QUEUE", "webhook.events"),
 		RabbitMQReconnectMs:      getEnvAsInt("RABBITMQ_RECONNECT_MS", 1000),

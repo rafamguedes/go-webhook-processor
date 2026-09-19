@@ -1,4 +1,5 @@
 @baseUrl = http://localhost:8080
+@dlqReplayToken = local-dev-replay-token
 
 ### Health check
 GET {{baseUrl}}/health
@@ -72,6 +73,11 @@ Content-Type: application/json
     "simulateFailure": true
   }
 }
+
+### Reprocessar uma dead letter pela API interna
+# O token deve ser igual a DLQ_REPLAY_TOKEN no .env.
+POST {{baseUrl}}/internal/dead-letters/evt-fail-00111/replay
+Authorization: Bearer local-dev-replay-token
 
 ### Cenário DLQ: consultar após o retry/backoff
 # Aguarde o tempo configurado em MAX_RETRIES e RETRY_BACKOFF_SECONDS antes de executar.
