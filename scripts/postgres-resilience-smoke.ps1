@@ -1,5 +1,6 @@
 param(
-    [int]$RecoveryWaitSeconds = 15
+    [int]$RecoveryWaitSeconds = 15,
+    [int]$RecoveryTimeoutSeconds = 60
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,22 +19,33 @@ try {
     docker compose stop postgres | Out-Null
 
     Write-Host "Submitting an event while PostgreSQL is unavailable..."
-    try {
-        Invoke-RestMethod -Method Post -Uri "http://localhost:8080/events" -ContentType "application/json" -Body $eventBody | Out-Null
-        throw "The application accepted an event while PostgreSQL was unavailable."
+    $unavailableResponse = Invoke-WebRequest -Method Post -Uri "http://localhost:8080/events" -ContentType "application/json" -Body $eventBody -SkipHttpErrorCheck
+    if ($unavailableResponse.StatusCode -ne 500) {
+        throw "Expected HTTP 500 while PostgreSQL was unavailable, got HTTP $($unavailableResponse.StatusCode)."
     }
-    catch [System.Net.WebException] {
-        Write-Host "The request failed as expected while PostgreSQL was unavailable."
-    }
+    Write-Host "The request failed as expected while PostgreSQL was unavailable."
 
     Write-Host "Starting PostgreSQL and waiting for recovery..."
     docker compose start postgres | Out-Null
     Start-Sleep -Seconds $RecoveryWaitSeconds
 
-    $response = Invoke-RestMethod -Method Post -Uri "http://localhost:8080/events" -ContentType "application/json" -Body $eventBody
-    if (-not $response.accepted -or $response.eventId -ne $eventId) {
-        throw "The application did not accept the event after PostgreSQL recovery."
+    $deadline = (Get-Date).AddSeconds($RecoveryTimeoutSeconds)
+    do {
+        $response = Invoke-WebRequest -Method Post -Uri "http://localhost:8080/events" -ContentType "application/json" -Body $eventBody -SkipHttpErrorCheck
+        if ($response.StatusCode -eq 202) {
+            $responseBody = $response.Content | ConvertFrom-Json
+            if ($responseBody.accepted -and $responseBody.eventId -eq $eventId) {
+                break
+            }
+        }
+
+        if ((Get-Date) -ge $deadline) {
+            throw "The application did not accept the event after PostgreSQL recovery within ${RecoveryTimeoutSeconds}s."
+        }
+
+        Start-Sleep -Seconds 2
     }
+    while ($true)
 
     Write-Host "PostgreSQL resilience smoke test passed for event $eventId."
 }
