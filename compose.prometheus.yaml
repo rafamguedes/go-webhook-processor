@@ -1,0 +1,16 @@
+services:
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: go-webhook-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      webhook-processor:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
