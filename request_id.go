@@ -16,6 +16,7 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 		}
 
 		w.Header().Set("X-Request-ID", requestID)
+		r.Header.Set("X-Request-ID", requestID)
 		startedAt := time.Now()
 		slog.Info("http request started", "request_id", requestID, "method", r.Method, "path", r.URL.Path)
 		next.ServeHTTP(w, r)
