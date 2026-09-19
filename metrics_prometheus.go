@@ -12,7 +12,7 @@ func (metrics *Metrics) Prometheus(queueLength int, queueCapacity int) string {
 	writeCounter := func(name, help string, value int64) {
 		fmt.Fprintf(&output, "# HELP %s %s\n# TYPE %s counter\n%s %d\n", name, help, name, name, value)
 	}
-	writeGauge := func(name, help string, value int) {
+	writeGauge := func(name, help string, value int64) {
 		fmt.Fprintf(&output, "# HELP %s %s\n# TYPE %s gauge\n%s %d\n", name, help, name, name, value)
 	}
 
@@ -26,8 +26,11 @@ func (metrics *Metrics) Prometheus(queueLength int, queueCapacity int) string {
 	writeCounter("webhook_dead_letter_replay_rejected_total", "Rejected dead letter replay requests.", snapshot.DeadLetterReplayRejected)
 	writeCounter("webhook_dead_letter_auto_retries_total", "Dead letters replayed automatically.", snapshot.DeadLetterAutoRetries)
 	writeCounter("webhook_dead_letter_auto_retry_failed_total", "Failed automatic dead letter replays.", snapshot.DeadLetterAutoRetryFailed)
-	writeGauge("webhook_queue_length", "Current in-process queue length.", snapshot.QueueLength)
-	writeGauge("webhook_queue_capacity", "Configured in-process queue capacity.", snapshot.QueueCapacity)
+	writeGauge("webhook_queue_length", "Current in-process queue length.", int64(snapshot.QueueLength))
+	writeGauge("webhook_queue_capacity", "Configured in-process queue capacity.", int64(snapshot.QueueCapacity))
+	writeCounter("webhook_event_processing_duration_nanoseconds_total", "Total event processing duration in nanoseconds.", metrics.processingLatency.sumNS.Load())
+	writeCounter("webhook_event_processing_attempts_total", "Total event processing attempts measured for latency.", metrics.processingLatency.count.Load())
+	writeGauge("webhook_event_processing_duration_nanoseconds_max", "Maximum observed event processing duration in nanoseconds.", metrics.processingLatency.maxNS.Load())
 
 	return output.String()
 }

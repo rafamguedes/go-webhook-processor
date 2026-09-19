@@ -14,6 +14,7 @@ type Metrics struct {
 	deadLetterReplayRejected  atomic.Int64
 	deadLetterAutoRetries     atomic.Int64
 	deadLetterAutoRetryFailed atomic.Int64
+	processingLatency         ProcessingLatency
 }
 
 type MetricsResponse struct {

@@ -76,7 +76,9 @@ func processEventWithRetry(workerID int, event Event, config Config, processor e
 	maxAttempts := config.MaxRetries + 1
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		startedAt := time.Now()
 		err := processor(workerID, event)
+		metrics.ObserveEventProcessingDuration(time.Since(startedAt))
 		if err == nil {
 			metrics.IncEventsProcessed()
 			if markErr := eventStore.MarkProcessed(context.Background(), event.ID, attempt); markErr != nil {

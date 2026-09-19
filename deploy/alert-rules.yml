@@ -1,0 +1,38 @@
+groups:
+  - name: webhook-processor
+    rules:
+      - alert: WebhookPermanentFailures
+        expr: increase(webhook_events_failed_permanent_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Webhook events are failing permanently"
+          description: "Permanent event failures were detected in the last 5 minutes."
+
+      - alert: WebhookDeadLetterGrowing
+        expr: increase(webhook_dead_letter_auto_retry_failed_total[10m]) > 0 or increase(webhook_dead_letter_replay_rejected_total[10m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Dead letter processing is failing"
+          description: "Dead letter retries or replay requests are failing."
+
+      - alert: WebhookQueueNearCapacity
+        expr: webhook_queue_capacity > 0 and webhook_queue_length / webhook_queue_capacity > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Webhook queue is near capacity"
+          description: "The in-process queue has been above 80% capacity for 5 minutes."
+
+      - alert: WebhookProcessingLatencyHigh
+        expr: rate(webhook_event_processing_duration_nanoseconds_total[5m]) / rate(webhook_event_processing_attempts_total[5m]) > 5000000000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Webhook processing latency is high"
+          description: "Average event processing latency has exceeded 5 seconds."
