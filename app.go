@@ -29,5 +29,5 @@ func (app App) routes() http.Handler {
 	mux.HandleFunc("POST /internal/dead-letters/{eventID}/replay", app.replayDeadLetterHandler)
 	mux.HandleFunc("POST /events", app.createEventHandler)
 
-	return mux
+	return requestIDMiddleware(mux)
 }
