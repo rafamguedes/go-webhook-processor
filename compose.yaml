@@ -28,7 +28,6 @@ services:
       PORT: "8080"
       LOG_FORMAT: json
       DATABASE_PATH: /data/events.db
-      QUEUE_PROVIDER: ${QUEUE_PROVIDER:-memory}
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-webhook}:${RABBITMQ_PASSWORD:-webhook_dev}@rabbitmq:5672/
       RABBITMQ_QUEUE: ${RABBITMQ_QUEUE:-webhook.events}
       RABBITMQ_RECONNECT_MS: ${RABBITMQ_RECONNECT_MS:-1000}

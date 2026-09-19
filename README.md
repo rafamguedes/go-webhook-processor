@@ -26,7 +26,7 @@ Cliente externo
       -> transação SQLite: events + outbox
         -> resposta HTTP 202 Accepted
           -> dispatcher lê mensagens pendentes
-            -> EventQueue (memória ou RabbitMQ)
+            -> RabbitMQ / EventQueue
               -> workers processam com retry/backoff
                 -> atualização do status para processed ou failed
 ```
@@ -35,7 +35,7 @@ Cliente externo
 
 ### GET /health
 
-Retorna o status da aplicação e informações básicas da fila interna.
+Retorna o status da aplicação e informações básicas do buffer local de entregas do RabbitMQ.
 
 ### GET /metrics
 
@@ -78,7 +78,6 @@ Possíveis respostas:
 202 Accepted            evento e mensagem de Outbox persistidos atomicamente
 400 Bad Request         JSON inválido ou campos obrigatórios ausentes
 409 Conflict            event.id duplicado ou já persistido
-503 Service Unavailable fila interna cheia
 ```
 
 ## Arquitetura
@@ -88,10 +87,11 @@ main.go             bootstrap, servidor HTTP e encerramento gracioso
 config.go           leitura e validação de configurações por ambiente
 logger.go           configuração de logs estruturados com slog
 app.go              estado da aplicação, dependências e registro das rotas
-queue.go            contrato EventQueue e implementação em memória
+queue.go            contratos de publicação, consumo e entrega de eventos
 models.go           contratos de entrada e saída usados pela API
 metrics.go          contadores thread-safe e snapshot de métricas
 event_store.go      persistência SQLite, estados, idempotência e tabela Outbox
+rabbitmq_queue.go   implementação durável da EventQueue com RabbitMQ
 deadletter.go       armazenamento em memória dos eventos com falha permanente
 handlers.go         handlers HTTP, validação, persistência e respostas JSON
 outbox.go          dispatcher de mensagens pendentes para a EventQueue
@@ -118,7 +118,6 @@ MAX_RETRIES=3
 RETRY_BACKOFF_SECONDS=1
 DEAD_LETTER_CAPACITY=100
 DATABASE_PATH=./events.db
-QUEUE_PROVIDER=memory
 RABBITMQ_URL=amqp://webhook:webhook_dev@localhost:5672/
 RABBITMQ_QUEUE=webhook.events
 RABBITMQ_RECONNECT_MS=1000
@@ -129,7 +128,7 @@ Descrição das variáveis:
 
 ```text
 PORT                          porta HTTP usada pelo servidor
-QUEUE_SIZE                    quantidade máxima de eventos aguardando na fila interna
+QUEUE_SIZE                    capacidade do buffer local entre RabbitMQ e workers
 WORKER_COUNT                  quantidade de workers processando eventos em paralelo
 READ_HEADER_TIMEOUT_SECONDS   timeout para leitura dos headers HTTP
 SHUTDOWN_TIMEOUT_SECONDS      tempo máximo para encerramento gracioso do servidor HTTP
@@ -138,8 +137,7 @@ MAX_RETRIES                   quantidade de novas tentativas após a primeira fa
 RETRY_BACKOFF_SECONDS         base em segundos para o backoff entre tentativas
 DEAD_LETTER_CAPACITY          quantidade máxima de eventos mantidos na dead-letter queue
 DATABASE_PATH                 caminho do arquivo SQLite usado para persistir eventos
-QUEUE_PROVIDER                implementação da fila: memory ou rabbitmq
-RABBITMQ_URL                  endereço AMQP usado quando o provider for rabbitmq
+RABBITMQ_URL                  endereço AMQP do RabbitMQ
 RABBITMQ_QUEUE                nome da fila durável no RabbitMQ
 RABBITMQ_RECONNECT_MS         espera entre tentativas de reconexão do consumidor
 RABBITMQ_CONNECT_TIMEOUT_MS   timeout para cada tentativa de conexão AMQP
@@ -187,7 +185,7 @@ A entrega é `at-least-once`: uma falha depois da publicação e antes da atuali
 
 ## Concorrência
 
-A aplicação depende do contrato `EventQueue`, não diretamente de um channel. Esse contrato combina interfaces menores: `EventPublisher`, usada para publicar, e `EventConsumer`, usada pelos workers para consumir. A implementação atual, `MemoryEventQueue`, encapsula um `chan Event`.
+A aplicação depende do contrato `EventQueue`, implementado exclusivamente por `RabbitMQEventQueue`. O contrato combina interfaces menores: `EventPublisher`, usada pelo Outbox, e `EventConsumer`, usada pelos workers. Um channel interno funciona apenas como ponte entre as entregas AMQP e as goroutines; ele não é uma fila alternativa nem durável.
 
 O handler HTTP não publica diretamente. O `OutboxDispatcher` usa `Publish` e mantém a mensagem pendente quando a publicação falha. `Events`, `Stats`, `StopConsuming` e `Close` completam o ciclo de consumo, observabilidade e encerramento.
 
@@ -259,7 +257,7 @@ RabbitMQ AMQP        localhost:5672
 RabbitMQ Management  http://localhost:15672
 ```
 
-Use `QUEUE_PROVIDER=memory` para a fila local ou `QUEUE_PROVIDER=rabbitmq` para publicar e consumir pelo broker. O adaptador declara uma fila durável, publica mensagens persistentes com confirmação do broker e usa ACK manual após o processamento.
+O RabbitMQ é a fila obrigatória da aplicação. O adaptador declara uma fila durável, publica mensagens persistentes com confirmação do broker e usa ACK manual após o processamento.
 
 Build isolado da imagem:
 

@@ -150,7 +150,7 @@ func TestCreateEventHandlerRejectsDuplicateEventIDAfterAppRestart(t *testing.T) 
 	app.createEventHandler(firstResponse, firstRequest)
 
 	config := testConfig()
-	restartedApp := NewApp(config, app.eventStore, NewMemoryEventQueue(config.QueueSize))
+	restartedApp := NewApp(config, app.eventStore, newTestEventQueue(config.QueueSize))
 	secondRequest := httptest.NewRequest(http.MethodPost, "/events", strings.NewReader(body))
 	secondResponse := httptest.NewRecorder()
 	restartedApp.createEventHandler(secondResponse, secondRequest)

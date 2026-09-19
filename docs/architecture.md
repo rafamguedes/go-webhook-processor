@@ -38,7 +38,7 @@ O dispatcher executa continuamente:
 
 1. Busca um lote de mensagens com `published_at IS NULL`.
 2. Publica cada evento pela interface `EventPublisher`.
-3. Aguarda a confirmação do provider.
+3. Aguarda a confirmação do RabbitMQ.
 4. Marca a mensagem como publicada.
 5. Em caso de falha, incrementa `attempts`, registra `last_error` e tenta novamente em outro ciclo.
 
@@ -96,7 +96,7 @@ Cliente -> HTTP -> SQLite (events + outbox) -> dispatcher -> EventQueue -> worke
 - `handlers.go`: valida e persiste a transação.
 - `event_store.go`: mantém eventos e mensagens Outbox.
 - `outbox.go`: publica mensagens pendentes.
-- `queue.go`: define contratos independentes do provider.
+- `queue.go`: define os contratos de publicação, consumo e entrega.
 - `rabbitmq_queue.go`: implementa publicação confirmada e consumo com ACK manual.
 
 ## Reconexão RabbitMQ

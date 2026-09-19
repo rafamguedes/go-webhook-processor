@@ -9,11 +9,6 @@ import (
 	"time"
 )
 
-const (
-	QueueProviderMemory   = "memory"
-	QueueProviderRabbitMQ = "rabbitmq"
-)
-
 type Config struct {
 	Port                     string
 	QueueSize                int
@@ -25,7 +20,6 @@ type Config struct {
 	RetryBackoffSeconds      int
 	DeadLetterCapacity       int
 	DatabasePath             string
-	QueueProvider            string
 	RabbitMQURL              string
 	RabbitMQQueue            string
 	RabbitMQReconnectMs      int
@@ -46,7 +40,6 @@ func LoadConfig() (Config, error) {
 		RetryBackoffSeconds:      getEnvAsInt("RETRY_BACKOFF_SECONDS", 1),
 		DeadLetterCapacity:       getEnvAsInt("DEAD_LETTER_CAPACITY", 100),
 		DatabasePath:             getEnv("DATABASE_PATH", "./events.db"),
-		QueueProvider:            getEnv("QUEUE_PROVIDER", QueueProviderMemory),
 		RabbitMQURL:              getEnv("RABBITMQ_URL", "amqp://webhook:webhook_dev@localhost:5672/"),
 		RabbitMQQueue:            getEnv("RABBITMQ_QUEUE", "webhook.events"),
 		RabbitMQReconnectMs:      getEnvAsInt("RABBITMQ_RECONNECT_MS", 1000),
@@ -58,69 +51,50 @@ func LoadConfig() (Config, error) {
 	if config.QueueSize <= 0 {
 		return Config{}, fmt.Errorf("QUEUE_SIZE must be greater than zero")
 	}
-
 	if config.WorkerCount <= 0 {
 		return Config{}, fmt.Errorf("WORKER_COUNT must be greater than zero")
 	}
-
 	if config.ReadHeaderTimeoutSeconds <= 0 {
 		return Config{}, fmt.Errorf("READ_HEADER_TIMEOUT_SECONDS must be greater than zero")
 	}
-
 	if config.ShutdownTimeoutSeconds <= 0 {
 		return Config{}, fmt.Errorf("SHUTDOWN_TIMEOUT_SECONDS must be greater than zero")
 	}
-
 	if config.LogFormat != "json" && config.LogFormat != "text" {
 		return Config{}, fmt.Errorf("LOG_FORMAT must be json or text")
 	}
-
 	if config.MaxRetries < 0 {
 		return Config{}, fmt.Errorf("MAX_RETRIES must be zero or greater")
 	}
-
 	if config.RetryBackoffSeconds <= 0 {
 		return Config{}, fmt.Errorf("RETRY_BACKOFF_SECONDS must be greater than zero")
 	}
-
 	if config.DeadLetterCapacity <= 0 {
 		return Config{}, fmt.Errorf("DEAD_LETTER_CAPACITY must be greater than zero")
 	}
-
 	if config.DatabasePath == "" {
 		return Config{}, fmt.Errorf("DATABASE_PATH is required")
 	}
-
 	if config.RabbitMQReconnectMs <= 0 {
 		return Config{}, fmt.Errorf("RABBITMQ_RECONNECT_MS must be greater than zero")
 	}
-
 	if config.RabbitMQConnectTimeoutMs <= 0 {
 		return Config{}, fmt.Errorf("RABBITMQ_CONNECT_TIMEOUT_MS must be greater than zero")
 	}
 	if config.OutboxPollIntervalMs <= 0 {
 		return Config{}, fmt.Errorf("OUTBOX_POLL_INTERVAL_MS must be greater than zero")
 	}
-
 	if config.OutboxBatchSize <= 0 {
 		return Config{}, fmt.Errorf("OUTBOX_BATCH_SIZE must be greater than zero")
 	}
-
-	if config.QueueProvider != QueueProviderMemory && config.QueueProvider != QueueProviderRabbitMQ {
-		return Config{}, fmt.Errorf("QUEUE_PROVIDER must be memory or rabbitmq")
+	if strings.TrimSpace(config.RabbitMQQueue) == "" {
+		return Config{}, fmt.Errorf("RABBITMQ_QUEUE is required")
 	}
 
-	if config.QueueProvider == QueueProviderRabbitMQ {
-		if strings.TrimSpace(config.RabbitMQQueue) == "" {
-			return Config{}, fmt.Errorf("RABBITMQ_QUEUE is required when QUEUE_PROVIDER is rabbitmq")
-		}
-
-		rabbitMQURL, err := url.Parse(config.RabbitMQURL)
-		if err != nil || rabbitMQURL.Host == "" || (rabbitMQURL.Scheme != "amqp" && rabbitMQURL.Scheme != "amqps") {
-			return Config{}, fmt.Errorf("RABBITMQ_URL must be a valid amqp or amqps URL when QUEUE_PROVIDER is rabbitmq")
-		}
+	rabbitMQURL, err := url.Parse(config.RabbitMQURL)
+	if err != nil || rabbitMQURL.Host == "" || (rabbitMQURL.Scheme != "amqp" && rabbitMQURL.Scheme != "amqps") {
+		return Config{}, fmt.Errorf("RABBITMQ_URL must be a valid amqp or amqps URL")
 	}
-
 	return config, nil
 }
 
@@ -143,6 +117,7 @@ func (config Config) RabbitMQReconnectInterval() time.Duration {
 func (config Config) RabbitMQConnectTimeout() time.Duration {
 	return time.Duration(config.RabbitMQConnectTimeoutMs) * time.Millisecond
 }
+
 func (config Config) OutboxPollInterval() time.Duration {
 	return time.Duration(config.OutboxPollIntervalMs) * time.Millisecond
 }
@@ -156,7 +131,6 @@ func getEnv(key string, fallback string) string {
 	if !exists || value == "" {
 		return fallback
 	}
-
 	return value
 }
 
@@ -165,11 +139,9 @@ func getEnvAsInt(key string, fallback int) int {
 	if !exists || value == "" {
 		return fallback
 	}
-
 	intValue, err := strconv.Atoi(value)
 	if err != nil {
 		return fallback
 	}
-
 	return intValue
 }

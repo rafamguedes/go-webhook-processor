@@ -73,10 +73,6 @@ func (queue *RabbitMQEventQueue) Publish(ctx context.Context, event Event) error
 	return queue.publish(ctx, event)
 }
 
-func (queue *RabbitMQEventQueue) TryPublish(ctx context.Context, event Event) error {
-	return queue.publish(ctx, event)
-}
-
 func (queue *RabbitMQEventQueue) publish(ctx context.Context, event Event) error {
 	body, err := json.Marshal(event)
 	if err != nil {

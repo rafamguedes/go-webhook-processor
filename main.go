@@ -27,9 +27,9 @@ func main() {
 	}
 	defer eventStore.Close()
 
-	eventQueue, err := NewConfiguredEventQueue(config)
+	eventQueue, err := OpenRabbitMQEventQueue(config)
 	if err != nil {
-		slog.Error("configure event queue failed", "provider", config.QueueProvider, "error", err)
+		slog.Error("configure RabbitMQ event queue failed", "error", err)
 		os.Exit(1)
 	}
 	app := NewApp(config, eventStore, eventQueue)

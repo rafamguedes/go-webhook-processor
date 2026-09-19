@@ -12,7 +12,6 @@ func TestLoadConfigUsesDefaults(t *testing.T) {
 	t.Setenv("MAX_RETRIES", "")
 	t.Setenv("RETRY_BACKOFF_SECONDS", "")
 	t.Setenv("DEAD_LETTER_CAPACITY", "")
-	t.Setenv("QUEUE_PROVIDER", "")
 	t.Setenv("RABBITMQ_URL", "")
 	t.Setenv("RABBITMQ_QUEUE", "")
 	t.Setenv("OUTBOX_POLL_INTERVAL_MS", "")
@@ -51,10 +50,6 @@ func TestLoadConfigUsesDefaults(t *testing.T) {
 		t.Fatalf("expected default dead letter capacity 100, got %d", config.DeadLetterCapacity)
 	}
 
-	if config.QueueProvider != QueueProviderMemory {
-		t.Fatalf("expected default queue provider memory, got %s", config.QueueProvider)
-	}
-
 	if config.RabbitMQQueue != "webhook.events" {
 		t.Fatalf("expected default RabbitMQ queue webhook.events, got %s", config.RabbitMQQueue)
 	}
@@ -73,7 +68,6 @@ func TestLoadConfigReadsEnvironmentVariables(t *testing.T) {
 	t.Setenv("MAX_RETRIES", "5")
 	t.Setenv("RETRY_BACKOFF_SECONDS", "2")
 	t.Setenv("DEAD_LETTER_CAPACITY", "20")
-	t.Setenv("QUEUE_PROVIDER", "rabbitmq")
 	t.Setenv("RABBITMQ_URL", "amqps://user:pass@rabbitmq.example.com/vhost")
 	t.Setenv("RABBITMQ_QUEUE", "events.production")
 	t.Setenv("OUTBOX_POLL_INTERVAL_MS", "250")
@@ -110,10 +104,6 @@ func TestLoadConfigReadsEnvironmentVariables(t *testing.T) {
 
 	if config.DeadLetterCapacity != 20 {
 		t.Fatalf("expected dead letter capacity 20, got %d", config.DeadLetterCapacity)
-	}
-
-	if config.QueueProvider != QueueProviderRabbitMQ {
-		t.Fatalf("expected queue provider rabbitmq, got %s", config.QueueProvider)
 	}
 
 	if config.RabbitMQURL != "amqps://user:pass@rabbitmq.example.com/vhost" {
@@ -163,17 +153,8 @@ func TestLoadConfigRejectsInvalidDeadLetterCapacity(t *testing.T) {
 		t.Fatal("expected config to reject invalid dead letter capacity")
 	}
 }
-func TestLoadConfigRejectsInvalidQueueProvider(t *testing.T) {
-	t.Setenv("QUEUE_PROVIDER", "kafka")
-
-	_, err := LoadConfig()
-	if err == nil {
-		t.Fatal("expected config to reject invalid queue provider")
-	}
-}
 
 func TestLoadConfigRejectsInvalidRabbitMQURL(t *testing.T) {
-	t.Setenv("QUEUE_PROVIDER", QueueProviderRabbitMQ)
 	t.Setenv("RABBITMQ_URL", "http://localhost:5672")
 
 	_, err := LoadConfig()
@@ -183,7 +164,6 @@ func TestLoadConfigRejectsInvalidRabbitMQURL(t *testing.T) {
 }
 
 func TestLoadConfigRejectsEmptyRabbitMQQueue(t *testing.T) {
-	t.Setenv("QUEUE_PROVIDER", QueueProviderRabbitMQ)
 	t.Setenv("RABBITMQ_QUEUE", " ")
 
 	_, err := LoadConfig()

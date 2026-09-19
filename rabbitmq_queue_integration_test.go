@@ -15,7 +15,6 @@ func TestRabbitMQEventQueuePublishesAndAcknowledgesEvent(t *testing.T) {
 	}
 
 	config := testConfig()
-	config.QueueProvider = QueueProviderRabbitMQ
 	config.RabbitMQURL = rabbitMQURL
 	config.RabbitMQQueue = fmt.Sprintf("webhook.events.integration.%d", time.Now().UnixNano())
 	config.QueueSize = 2
@@ -46,7 +45,6 @@ func TestRabbitMQEventQueueReconnectsPublisherAndConsumer(t *testing.T) {
 	}
 
 	config := testConfig()
-	config.QueueProvider = QueueProviderRabbitMQ
 	config.RabbitMQURL = rabbitMQURL
 	config.RabbitMQQueue = fmt.Sprintf("webhook.events.reconnect.%d", time.Now().UnixNano())
 	config.QueueSize = 2

@@ -14,10 +14,6 @@ func (publisher failingEventPublisher) Publish(context.Context, Event) error {
 	return publisher.err
 }
 
-func (publisher failingEventPublisher) TryPublish(context.Context, Event) error {
-	return publisher.err
-}
-
 func TestOutboxDispatcherKeepsMessagePendingAfterPublishFailure(t *testing.T) {
 	store := newTestEventStore(t)
 	if err := store.SaveQueuedWithOutbox(t.Context(), testEvent()); err != nil {
@@ -44,7 +40,7 @@ func TestOutboxDispatcherKeepsMessagePendingAfterPublishFailure(t *testing.T) {
 
 func TestOutboxDispatcherMarksMessagePublished(t *testing.T) {
 	store := newTestEventStore(t)
-	queue := NewMemoryEventQueue(1)
+	queue := newTestEventQueue(1)
 	metrics := NewMetrics()
 	if err := store.SaveQueuedWithOutbox(t.Context(), testEvent()); err != nil {
 		t.Fatalf("failed to save event with outbox: %v", err)
