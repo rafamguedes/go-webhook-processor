@@ -119,6 +119,7 @@ func TestEventStoreTreatsProcessedEventAsFinal(t *testing.T) {
 func TestEventStorePersistsDeadLetter(t *testing.T) {
 	store, databaseURL := newTestEventStoreWithURL(t)
 	event := testEvent()
+	event.RequestID = "request-dead-letter-001"
 	if err := store.SaveDeadLetter(t.Context(), event, errForTest(), 3); err != nil {
 		t.Fatalf("failed to save dead letter: %v", err)
 	}
@@ -141,5 +142,8 @@ func TestEventStorePersistsDeadLetter(t *testing.T) {
 	}
 	if items[0].Event.ID != event.ID || items[0].Attempts != 3 {
 		t.Fatalf("unexpected persisted dead letter: %+v", items[0])
+	}
+	if items[0].Event.RequestID != event.RequestID {
+		t.Fatalf("expected request ID %q, got %q", event.RequestID, items[0].Event.RequestID)
 	}
 }
