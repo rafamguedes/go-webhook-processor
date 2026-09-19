@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -46,8 +47,10 @@ type EventStore struct {
 	db *sql.DB
 }
 
+const sqliteBusyTimeoutMs = 5000
+
 func OpenEventStore(databasePath string) (*EventStore, error) {
-	db, err := sql.Open("sqlite", databasePath)
+	db, err := sql.Open("sqlite", sqliteDSN(databasePath))
 	if err != nil {
 		return nil, fmt.Errorf("open event store: %w", err)
 	}
@@ -59,6 +62,14 @@ func OpenEventStore(databasePath string) (*EventStore, error) {
 	}
 
 	return store, nil
+}
+
+func sqliteDSN(databasePath string) string {
+	separator := "?"
+	if strings.Contains(databasePath, "?") {
+		separator = "&"
+	}
+	return fmt.Sprintf("%s%s_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)", databasePath, separator, sqliteBusyTimeoutMs)
 }
 
 func (store *EventStore) Close() error {

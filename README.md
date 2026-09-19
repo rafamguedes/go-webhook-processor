@@ -142,11 +142,16 @@ RABBITMQ_URL                  endereço AMQP do RabbitMQ
 RABBITMQ_QUEUE                nome da fila durável no RabbitMQ
 RABBITMQ_RECONNECT_MS         espera entre tentativas de reconexão do consumidor
 RABBITMQ_CONNECT_TIMEOUT_MS   timeout para cada tentativa de conexão AMQP
+OUTBOX_POLL_INTERVAL_MS        intervalo de consulta da Outbox em milissegundos
+OUTBOX_BATCH_SIZE              quantidade máxima de mensagens lidas por ciclo da Outbox
+PROCESSING_LEASE_SECONDS       tempo da reserva de processamento antes de expirar
+PROCESSING_REQUEUE_DELAY_MS    espera antes de reenfileirar uma entrega em processamento
 ```
 
 ## Persistência
 
 A aplicação usa SQLite para persistir o histórico operacional dos eventos recebidos.
+A conexão SQLite usa `busy_timeout` de 5 segundos e o modo de journal `WAL`. Assim, uma operação de escrita aguarda brevemente a liberação do banco em vez de falhar imediatamente com `SQLITE_BUSY`, enquanto leituras podem continuar com menor interferência.
 
 Cada evento aceito é salvo inicialmente como `queued`. Quando um worker adquire a reserva, o status passa para:
 

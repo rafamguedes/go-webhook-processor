@@ -25,8 +25,15 @@ services:
     image: go-webhook-processor:local
     container_name: go-webhook-processor
     environment:
-      PORT: "8080"
-      LOG_FORMAT: json
+      PORT: ${PORT:-8080}
+      QUEUE_SIZE: ${QUEUE_SIZE:-100}
+      WORKER_COUNT: ${WORKER_COUNT:-3}
+      READ_HEADER_TIMEOUT_SECONDS: ${READ_HEADER_TIMEOUT_SECONDS:-5}
+      SHUTDOWN_TIMEOUT_SECONDS: ${SHUTDOWN_TIMEOUT_SECONDS:-10}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      MAX_RETRIES: ${MAX_RETRIES:-3}
+      RETRY_BACKOFF_SECONDS: ${RETRY_BACKOFF_SECONDS:-1}
+      DEAD_LETTER_CAPACITY: ${DEAD_LETTER_CAPACITY:-100}
       DATABASE_PATH: /data/events.db
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-webhook}:${RABBITMQ_PASSWORD:-webhook_dev}@rabbitmq:5672/
       RABBITMQ_QUEUE: ${RABBITMQ_QUEUE:-webhook.events}
@@ -40,7 +47,7 @@ services:
       rabbitmq:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "${PORT:-8080}:${PORT:-8080}"
     volumes:
       - ./data:/data
     restart: unless-stopped
