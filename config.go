@@ -10,50 +10,56 @@ import (
 )
 
 type Config struct {
-	Port                       string
-	QueueSize                  int
-	WorkerCount                int
-	ReadHeaderTimeoutSeconds   int
-	ShutdownTimeoutSeconds     int
-	LogFormat                  string
-	MaxRetries                 int
-	RetryBackoffSeconds        int
-	DeadLetterCapacity         int
-	DatabaseURL                string
-	DLQReplayToken             string
-	RabbitMQURL                string
-	RabbitMQQueue              string
-	RabbitMQReconnectMs        int
-	RabbitMQConnectTimeoutMs   int
-	OutboxPollIntervalMs       int
-	OutboxBatchSize            int
-	OutboxDispatchLeaseSeconds int
-	ProcessingLeaseSeconds     int
-	ProcessingRequeueDelayMs   int
+	Port                        string
+	QueueSize                   int
+	WorkerCount                 int
+	ReadHeaderTimeoutSeconds    int
+	ShutdownTimeoutSeconds      int
+	LogFormat                   string
+	MaxRetries                  int
+	RetryBackoffSeconds         int
+	DeadLetterCapacity          int
+	DatabaseURL                 string
+	DLQReplayToken              string
+	DLQAutoRetryEnabled         bool
+	DLQAutoRetryIntervalSeconds int
+	DLQAutoRetryMaxAttempts     int
+	RabbitMQURL                 string
+	RabbitMQQueue               string
+	RabbitMQReconnectMs         int
+	RabbitMQConnectTimeoutMs    int
+	OutboxPollIntervalMs        int
+	OutboxBatchSize             int
+	OutboxDispatchLeaseSeconds  int
+	ProcessingLeaseSeconds      int
+	ProcessingRequeueDelayMs    int
 }
 
 func LoadConfig() (Config, error) {
 	config := Config{
-		Port:                       getEnv("PORT", "8080"),
-		QueueSize:                  getEnvAsInt("QUEUE_SIZE", 100),
-		WorkerCount:                getEnvAsInt("WORKER_COUNT", 3),
-		ReadHeaderTimeoutSeconds:   getEnvAsInt("READ_HEADER_TIMEOUT_SECONDS", 5),
-		ShutdownTimeoutSeconds:     getEnvAsInt("SHUTDOWN_TIMEOUT_SECONDS", 10),
-		LogFormat:                  getEnv("LOG_FORMAT", "json"),
-		MaxRetries:                 getEnvAsInt("MAX_RETRIES", 3),
-		RetryBackoffSeconds:        getEnvAsInt("RETRY_BACKOFF_SECONDS", 1),
-		DeadLetterCapacity:         getEnvAsInt("DEAD_LETTER_CAPACITY", 100),
-		DatabaseURL:                getEnv("DATABASE_URL", "postgres://webhook:webhook_dev@localhost:5432/webhook?sslmode=disable"),
-		DLQReplayToken:             getEnv("DLQ_REPLAY_TOKEN", ""),
-		RabbitMQURL:                getEnv("RABBITMQ_URL", "amqp://webhook:webhook_dev@localhost:5672/"),
-		RabbitMQQueue:              getEnv("RABBITMQ_QUEUE", "webhook.events"),
-		RabbitMQReconnectMs:        getEnvAsInt("RABBITMQ_RECONNECT_MS", 1000),
-		RabbitMQConnectTimeoutMs:   getEnvAsInt("RABBITMQ_CONNECT_TIMEOUT_MS", 5000),
-		OutboxPollIntervalMs:       getEnvAsInt("OUTBOX_POLL_INTERVAL_MS", 500),
-		OutboxBatchSize:            getEnvAsInt("OUTBOX_BATCH_SIZE", 100),
-		OutboxDispatchLeaseSeconds: getEnvAsInt("OUTBOX_DISPATCH_LEASE_SECONDS", 30),
-		ProcessingLeaseSeconds:     getEnvAsInt("PROCESSING_LEASE_SECONDS", 300),
-		ProcessingRequeueDelayMs:   getEnvAsInt("PROCESSING_REQUEUE_DELAY_MS", 1000),
+		Port:                        getEnv("PORT", "8080"),
+		QueueSize:                   getEnvAsInt("QUEUE_SIZE", 100),
+		WorkerCount:                 getEnvAsInt("WORKER_COUNT", 3),
+		ReadHeaderTimeoutSeconds:    getEnvAsInt("READ_HEADER_TIMEOUT_SECONDS", 5),
+		ShutdownTimeoutSeconds:      getEnvAsInt("SHUTDOWN_TIMEOUT_SECONDS", 10),
+		LogFormat:                   getEnv("LOG_FORMAT", "json"),
+		MaxRetries:                  getEnvAsInt("MAX_RETRIES", 3),
+		RetryBackoffSeconds:         getEnvAsInt("RETRY_BACKOFF_SECONDS", 1),
+		DeadLetterCapacity:          getEnvAsInt("DEAD_LETTER_CAPACITY", 100),
+		DatabaseURL:                 getEnv("DATABASE_URL", "postgres://webhook:webhook_dev@localhost:5432/webhook?sslmode=disable"),
+		DLQReplayToken:              getEnv("DLQ_REPLAY_TOKEN", ""),
+		DLQAutoRetryEnabled:         getEnvAsBool("DLQ_AUTO_RETRY_ENABLED", false),
+		DLQAutoRetryIntervalSeconds: getEnvAsInt("DLQ_AUTO_RETRY_INTERVAL_SECONDS", 60),
+		DLQAutoRetryMaxAttempts:     getEnvAsInt("DLQ_AUTO_RETRY_MAX_ATTEMPTS", 3),
+		RabbitMQURL:                 getEnv("RABBITMQ_URL", "amqp://webhook:webhook_dev@localhost:5672/"),
+		RabbitMQQueue:               getEnv("RABBITMQ_QUEUE", "webhook.events"),
+		RabbitMQReconnectMs:         getEnvAsInt("RABBITMQ_RECONNECT_MS", 1000),
+		RabbitMQConnectTimeoutMs:    getEnvAsInt("RABBITMQ_CONNECT_TIMEOUT_MS", 5000),
+		OutboxPollIntervalMs:        getEnvAsInt("OUTBOX_POLL_INTERVAL_MS", 500),
+		OutboxBatchSize:             getEnvAsInt("OUTBOX_BATCH_SIZE", 100),
+		OutboxDispatchLeaseSeconds:  getEnvAsInt("OUTBOX_DISPATCH_LEASE_SECONDS", 30),
+		ProcessingLeaseSeconds:      getEnvAsInt("PROCESSING_LEASE_SECONDS", 300),
+		ProcessingRequeueDelayMs:    getEnvAsInt("PROCESSING_REQUEUE_DELAY_MS", 1000),
 	}
 
 	if config.QueueSize <= 0 {
@@ -79,6 +85,12 @@ func LoadConfig() (Config, error) {
 	}
 	if config.DeadLetterCapacity <= 0 {
 		return Config{}, fmt.Errorf("DEAD_LETTER_CAPACITY must be greater than zero")
+	}
+	if config.DLQAutoRetryIntervalSeconds <= 0 {
+		return Config{}, fmt.Errorf("DLQ_AUTO_RETRY_INTERVAL_SECONDS must be greater than zero")
+	}
+	if config.DLQAutoRetryMaxAttempts < 0 {
+		return Config{}, fmt.Errorf("DLQ_AUTO_RETRY_MAX_ATTEMPTS must be zero or greater")
 	}
 	databaseURL, err := url.Parse(config.DatabaseURL)
 	if err != nil || databaseURL.Host == "" ||
@@ -174,4 +186,16 @@ func getEnvAsInt(key string, fallback int) int {
 		return fallback
 	}
 	return intValue
+}
+
+func getEnvAsBool(key string, fallback bool) bool {
+	value, exists := os.LookupEnv(key)
+	if !exists || value == "" {
+		return fallback
+	}
+	boolValue, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return boolValue
 }
