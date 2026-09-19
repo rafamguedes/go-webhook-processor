@@ -27,6 +27,14 @@ func main() {
 	}
 	defer eventStore.Close()
 
+	if handled, err := runCommand(context.Background(), os.Args[1:], eventStore); handled {
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	eventQueue, err := OpenRabbitMQEventQueue(config)
 	if err != nil {
 		slog.Error("configure RabbitMQ event queue failed", "error", err)

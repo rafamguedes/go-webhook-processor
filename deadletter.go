@@ -12,10 +12,11 @@ type DeadLetterRepository interface {
 }
 
 type DeadLetter struct {
-	Event    Event     `json:"event"`
-	Error    string    `json:"error"`
-	Attempts int       `json:"attempts"`
-	FailedAt time.Time `json:"failedAt"`
+	Event      Event      `json:"event"`
+	Error      string     `json:"error"`
+	Attempts   int        `json:"attempts"`
+	FailedAt   time.Time  `json:"failedAt"`
+	ReplayedAt *time.Time `json:"replayedAt,omitempty"`
 }
 
 type DeadLetterResponse struct {

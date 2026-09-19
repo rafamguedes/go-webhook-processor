@@ -60,6 +60,32 @@ Content-Type: application/json
   }
 }
 
+### Cenário DLQ: enviar evento que falha permanentemente
+# Use um id novo a cada execução, pois event.id é uma chave de idempotência.
+POST {{baseUrl}}/events
+Content-Type: application/json
+
+{
+  "id": "evt-dlq-replay-001",
+  "type": "payment.created",
+  "payload": {
+    "simulateFailure": true
+  }
+}
+
+### Cenário DLQ: consultar após o retry/backoff
+# Aguarde o tempo configurado em MAX_RETRIES e RETRY_BACKOFF_SECONDS antes de executar.
+GET {{baseUrl}}/dead-letters
+
+### Cenário DLQ: métricas após a falha permanente
+GET {{baseUrl}}/metrics
+
+### Cenário DLQ: consultar após o replay pelo comando interno
+# Execute no terminal, fora deste arquivo:
+# go run . replay-dead-letter evt-dlq-replay-001
+# Depois execute esta requisição novamente para verificar replayedAt.
+GET {{baseUrl}}/dead-letters
+
 ### Evento inválido: sem id
 POST {{baseUrl}}/events
 Content-Type: application/json

@@ -306,6 +306,67 @@ go test ./...
 go build .
 ```
 
+## Reprocessamento seguro da Dead Letter Queue
+
+Eventos marcados como `failed` podem ser reprocessados manualmente pelo comando interno:
+
+Para execução local, usando o banco padrão `./events.db`:
+
+```powershell
+go run . replay-dead-letter <event-id>
+```
+
+Quando a aplicação estiver rodando pelo Docker Compose, o banco real está em `./data/events.db`. Nesse caso, pare temporariamente o container da aplicação, execute o comando apontando para o mesmo arquivo e suba o serviço novamente:
+
+```powershell
+docker compose stop webhook-processor
+$env:DATABASE_PATH = "./data/events.db"
+go run . replay-dead-letter <event-id>
+docker compose up -d webhook-processor
+```
+
+Também é possível executar o comando usando a imagem da aplicação:
+
+```powershell
+docker compose stop webhook-processor
+docker compose run --rm --no-deps webhook-processor replay-dead-letter <event-id>
+docker compose up -d webhook-processor
+```
+
+O comando executa uma transação no SQLite e somente aceita um evento que esteja em `failed`. Nessa transação, o evento volta para `queued`, suas tentativas são zeradas, a mensagem correspondente da Outbox é reaberta e a falha recebe `replayed_at`. O registro original da DLQ não é apagado, preservando o histórico operacional.
+
+Depois que o serviço for iniciado novamente, o dispatcher publica a mensagem reaberta no RabbitMQ. O comando não inicia o servidor HTTP nem precisa abrir uma conexão com o broker.
+
+`replayed_at` é apenas uma marca de auditoria. Se o evento falhar novamente, a marca é limpa e a falha mais recente passa a representar o estado atual do evento.
+## Reset do ambiente Docker
+
+### Reset completo: SQLite e RabbitMQ
+
+Os comandos abaixo são destrutivos. Eles removem o banco SQLite, o volume persistente do RabbitMQ, os containers e recriam a aplicação do zero:
+
+```powershell
+docker compose down --volumes --remove-orphans
+Remove-Item -LiteralPath .\data\events.db -Force -ErrorAction SilentlyContinue
+docker compose up -d --build
+```
+
+Para acompanhar a inicialização:
+
+```powershell
+docker compose logs -f webhook-processor
+```
+
+### Reset apenas do SQLite
+
+Use esta opção quando quiser preservar usuários, exchanges, filas e mensagens do RabbitMQ:
+
+```powershell
+docker compose stop webhook-processor
+Remove-Item -LiteralPath .\data\events.db -Force -ErrorAction SilentlyContinue
+docker compose up -d --build webhook-processor
+```
+
+O diretório `./data` é recriado automaticamente pelo bind mount quando o container iniciar.
 ## Testes pela IDE
 
 O arquivo [`requests.http`](requests.http) contém chamadas prontas para uso com a extensão REST Client do VS Code.
