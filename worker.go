@@ -10,14 +10,14 @@ import (
 
 type eventProcessor func(workerID int, event Event) error
 
-func startWorkers(count int, eventQueue EventConsumer, workers *sync.WaitGroup, config Config, metrics *Metrics, deadLetters *DeadLetterStore, eventStore *EventStore) {
+func startWorkers(count int, eventQueue EventConsumer, workers *sync.WaitGroup, config Config, metrics *Metrics, deadLetters DeadLetterRepository, eventStore *EventStore) {
 	for workerID := 1; workerID <= count; workerID++ {
 		workers.Add(1)
 		go worker(workerID, eventQueue, workers, config, metrics, deadLetters, eventStore)
 	}
 }
 
-func worker(workerID int, eventQueue EventConsumer, workers *sync.WaitGroup, config Config, metrics *Metrics, deadLetters *DeadLetterStore, eventStore *EventStore) {
+func worker(workerID int, eventQueue EventConsumer, workers *sync.WaitGroup, config Config, metrics *Metrics, deadLetters DeadLetterRepository, eventStore *EventStore) {
 	defer workers.Done()
 
 	for delivery := range eventQueue.Events() {
@@ -27,7 +27,7 @@ func worker(workerID int, eventQueue EventConsumer, workers *sync.WaitGroup, con
 	slog.Info("worker stopped", "worker_id", workerID)
 }
 
-func handleDelivery(workerID int, delivery EventDelivery, config Config, metrics *Metrics, deadLetters *DeadLetterStore, eventStore *EventStore, processor eventProcessor, sleep func(time.Duration)) {
+func handleDelivery(workerID int, delivery EventDelivery, config Config, metrics *Metrics, deadLetters DeadLetterRepository, eventStore *EventStore, processor eventProcessor, sleep func(time.Duration)) {
 	event := delivery.Event
 	claim, err := eventStore.ClaimForProcessing(context.Background(), event.ID, config.ProcessingLease())
 	if err != nil {
@@ -72,7 +72,7 @@ func nackDelivery(delivery EventDelivery, requeue bool, workerID int, eventID st
 		slog.Error("reject event delivery failed", "worker_id", workerID, "event_id", eventID, "requeue", requeue, "error", err)
 	}
 }
-func processEventWithRetry(workerID int, event Event, config Config, processor eventProcessor, sleep func(time.Duration), metrics *Metrics, deadLetters *DeadLetterStore, eventStore *EventStore) (bool, bool) {
+func processEventWithRetry(workerID int, event Event, config Config, processor eventProcessor, sleep func(time.Duration), metrics *Metrics, deadLetters DeadLetterRepository, eventStore *EventStore) (bool, bool) {
 	maxAttempts := config.MaxRetries + 1
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
@@ -89,7 +89,10 @@ func processEventWithRetry(workerID int, event Event, config Config, processor e
 
 		if attempt == maxAttempts {
 			metrics.IncEventsFailedPermanent()
-			deadLetters.Add(event, err, attempt)
+			if deadLetterErr := deadLetters.Add(context.Background(), event, err, attempt); deadLetterErr != nil {
+				slog.Error("save dead letter failed", "event_id", event.ID, "error", deadLetterErr)
+				return false, false
+			}
 			if markErr := eventStore.MarkFailed(context.Background(), event.ID, attempt, err); markErr != nil {
 				slog.Error("mark event failed failed", "event_id", event.ID, "error", markErr)
 				return false, false

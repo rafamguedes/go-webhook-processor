@@ -6,7 +6,7 @@ type App struct {
 	config      Config
 	eventQueue  EventQueue
 	metrics     *Metrics
-	deadLetters *DeadLetterStore
+	deadLetters DeadLetterRepository
 	eventStore  *EventStore
 }
 
@@ -15,7 +15,7 @@ func NewApp(config Config, eventStore *EventStore, eventQueue EventQueue) App {
 		config:      config,
 		eventQueue:  eventQueue,
 		metrics:     NewMetrics(),
-		deadLetters: NewDeadLetterStore(config.DeadLetterCapacity),
+		deadLetters: NewPersistentDeadLetterStore(eventStore, config.DeadLetterCapacity),
 		eventStore:  eventStore,
 	}
 }

@@ -115,3 +115,31 @@ func TestEventStoreTreatsProcessedEventAsFinal(t *testing.T) {
 		t.Fatalf("expected processed event to be final, got %v", claim)
 	}
 }
+
+func TestEventStorePersistsDeadLetter(t *testing.T) {
+	store, databasePath := newTestEventStoreWithPath(t)
+	event := testEvent()
+	if err := store.SaveDeadLetter(t.Context(), event, errForTest(), 3); err != nil {
+		t.Fatalf("failed to save dead letter: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("failed to close event store: %v", err)
+	}
+
+	reopened, err := OpenEventStore(databasePath)
+	if err != nil {
+		t.Fatalf("failed to reopen event store: %v", err)
+	}
+	defer reopened.Close()
+
+	items, err := reopened.ListDeadLetters(t.Context(), 10)
+	if err != nil {
+		t.Fatalf("failed to list dead letters: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 persisted dead letter, got %d", len(items))
+	}
+	if items[0].Event.ID != event.ID || items[0].Attempts != 3 {
+		t.Fatalf("unexpected persisted dead letter: %+v", items[0])
+	}
+}

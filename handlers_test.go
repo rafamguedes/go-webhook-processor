@@ -78,7 +78,7 @@ func TestMetricsHandler(t *testing.T) {
 
 func TestDeadLettersHandler(t *testing.T) {
 	app := newTestApp(t)
-	app.deadLetters.Add(testEvent(), errForTest(), 4)
+	app.deadLetters.Add(t.Context(), testEvent(), errForTest(), 4)
 
 	request := httptest.NewRequest(http.MethodGet, "/dead-letters", nil)
 	response := httptest.NewRecorder()

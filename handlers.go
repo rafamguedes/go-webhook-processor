@@ -28,7 +28,12 @@ func (app App) metricsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (app App) deadLettersHandler(w http.ResponseWriter, r *http.Request) {
-	response := app.deadLetters.Snapshot()
+	response, err := app.deadLetters.Snapshot(r.Context())
+	if err != nil {
+		slog.Error("list dead letters failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list dead letters")
+		return
+	}
 	writeJSON(w, http.StatusOK, response)
 }
 

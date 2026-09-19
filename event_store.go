@@ -206,6 +206,54 @@ func (store *EventStore) ClaimForProcessing(ctx context.Context, eventID string,
 		return EventClaimInProgress, nil
 	}
 }
+func (store *EventStore) SaveDeadLetter(ctx context.Context, event Event, processingError error, attempts int) error {
+	payload, err := json.Marshal(event.Payload)
+	if err != nil {
+		return fmt.Errorf("marshal dead letter payload: %w", err)
+	}
+	_, err = store.db.ExecContext(ctx, `
+		INSERT INTO dead_letters (event_id, event_type, payload, error, attempts, failed_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(event_id) DO UPDATE SET
+			error = excluded.error,
+			attempts = excluded.attempts,
+			failed_at = excluded.failed_at
+	`, event.ID, event.Type, string(payload), processingError.Error(), attempts, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("save dead letter: %w", err)
+	}
+	return nil
+}
+
+func (store *EventStore) ListDeadLetters(ctx context.Context, limit int) ([]DeadLetter, error) {
+	rows, err := store.db.QueryContext(ctx, `
+		SELECT event_id, event_type, payload, error, attempts, failed_at
+		FROM dead_letters
+		ORDER BY failed_at DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list dead letters: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]DeadLetter, 0)
+	for rows.Next() {
+		var item DeadLetter
+		var payload string
+		if err := rows.Scan(&item.Event.ID, &item.Event.Type, &payload, &item.Error, &item.Attempts, &item.FailedAt); err != nil {
+			return nil, fmt.Errorf("scan dead letter: %w", err)
+		}
+		if err := json.Unmarshal([]byte(payload), &item.Event.Payload); err != nil {
+			return nil, fmt.Errorf("decode dead letter %s payload: %w", item.Event.ID, err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate dead letters: %w", err)
+	}
+	return items, nil
+}
 func (store *EventStore) MarkProcessed(ctx context.Context, eventID string, attempts int) error {
 	now := time.Now().UTC()
 	_, err := store.db.ExecContext(ctx, `
@@ -284,6 +332,14 @@ func (store *EventStore) migrate(ctx context.Context) error {
 			processing_started_at TIMESTAMP
 		);
 
+		CREATE TABLE IF NOT EXISTS dead_letters (
+			event_id TEXT PRIMARY KEY,
+			event_type TEXT NOT NULL,
+			payload TEXT NOT NULL,
+			error TEXT NOT NULL,
+			attempts INTEGER NOT NULL,
+			failed_at TIMESTAMP NOT NULL
+		);
 		CREATE TABLE IF NOT EXISTS outbox (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			event_id TEXT NOT NULL UNIQUE,

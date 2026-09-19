@@ -58,7 +58,10 @@ func TestProcessEventWithRetrySucceedsAfterFailure(t *testing.T) {
 		t.Fatalf("expected 1 processed event, got %d", snapshot.EventsProcessed)
 	}
 
-	deadLetterSnapshot := deadLetters.Snapshot()
+	deadLetterSnapshot, snapshotErr := deadLetters.Snapshot(t.Context())
+	if snapshotErr != nil {
+		t.Fatalf("failed to snapshot dead letters: %v", snapshotErr)
+	}
 	if deadLetterSnapshot.Count != 0 {
 		t.Fatalf("expected no dead letters, got %d", deadLetterSnapshot.Count)
 	}
@@ -110,7 +113,10 @@ func TestProcessEventWithRetryFailsPermanently(t *testing.T) {
 		t.Fatalf("expected 1 permanent failure, got %d", snapshot.EventsFailedPermanent)
 	}
 
-	deadLetterSnapshot := deadLetters.Snapshot()
+	deadLetterSnapshot, snapshotErr := deadLetters.Snapshot(t.Context())
+	if snapshotErr != nil {
+		t.Fatalf("failed to snapshot dead letters: %v", snapshotErr)
+	}
 	if deadLetterSnapshot.Count != 1 {
 		t.Fatalf("expected 1 dead letter, got %d", deadLetterSnapshot.Count)
 	}
@@ -122,11 +128,14 @@ func TestProcessEventWithRetryFailsPermanently(t *testing.T) {
 
 func TestDeadLetterStoreKeepsCapacity(t *testing.T) {
 	store := NewDeadLetterStore(2)
-	store.Add(Event{ID: "evt-001", Type: "test"}, errForTest(), 1)
-	store.Add(Event{ID: "evt-002", Type: "test"}, errForTest(), 1)
-	store.Add(Event{ID: "evt-003", Type: "test"}, errForTest(), 1)
+	store.Add(t.Context(), Event{ID: "evt-001", Type: "test"}, errForTest(), 1)
+	store.Add(t.Context(), Event{ID: "evt-002", Type: "test"}, errForTest(), 1)
+	store.Add(t.Context(), Event{ID: "evt-003", Type: "test"}, errForTest(), 1)
 
-	snapshot := store.Snapshot()
+	snapshot, snapshotErr := store.Snapshot(t.Context())
+	if snapshotErr != nil {
+		t.Fatalf("failed to snapshot dead letters: %v", snapshotErr)
+	}
 	if snapshot.Count != 2 {
 		t.Fatalf("expected 2 dead letters, got %d", snapshot.Count)
 	}

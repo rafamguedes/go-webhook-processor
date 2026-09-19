@@ -91,7 +91,7 @@ sequenceDiagram
 ## Componentes
 
 ```text
-Cliente -> HTTP -> SQLite (events + outbox) -> dispatcher -> EventQueue -> workers -> processamento
+Cliente -> HTTP -> SQLite (events + outbox) -> dispatcher -> RabbitMQ -> workers -> events/dead_letters
 ```
 
 - `handlers.go`: valida e persiste a transação.
@@ -120,3 +120,7 @@ WHERE id = ?
 ```
 
 Uma linha alterada significa que o worker adquiriu o lease. Nenhuma linha alterada faz o worker consultar o estado atual: estados finais são confirmados sem reprocessamento; um lease ativo provoca NACK com requeue; um lease expirado pode ser recuperado. `PROCESSING_LEASE_SECONDS` deve ser maior que o tempo máximo esperado do processamento normal.
+
+## Dead Letter persistente
+
+Quando todas as tentativas de processamento falham, o worker grava o evento na tabela `dead_letters` com erro, quantidade de tentativas e `failed_at`. O endpoint `GET /dead-letters` consulta o SQLite, portanto o histórico permanece disponível após reinícios. O reprocessamento ainda será uma operação separada, para evitar republicar eventos sem uma política explícita.

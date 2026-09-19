@@ -57,7 +57,7 @@ Retorna um snapshot dos principais contadores operacionais da aplicação.
 
 ### GET /dead-letters
 
-Retorna os eventos que falharam permanentemente após esgotar as tentativas de retry. Este endpoint mostra apenas falhas permanentes mantidas em memória.
+Retorna os eventos que falharam permanentemente após esgotar as tentativas de retry. Este endpoint consulta falhas permanentes persistidas no SQLite, mesmo após a reinicialização da aplicação.
 
 ### POST /events
 
@@ -93,7 +93,7 @@ models.go           contratos de entrada e saída usados pela API
 metrics.go          contadores thread-safe e snapshot de métricas
 event_store.go      persistência SQLite, estados, idempotência e tabela Outbox
 rabbitmq_queue.go   implementação durável da EventQueue com RabbitMQ
-deadletter.go       armazenamento em memória dos eventos com falha permanente
+deadletter.go       contrato e implementações da dead-letter persistente e de teste
 handlers.go         handlers HTTP, validação, persistência e respostas JSON
 outbox.go          dispatcher de mensagens pendentes para a EventQueue
 worker.go           workers, retry e backoff do processamento assíncrono
@@ -136,7 +136,7 @@ SHUTDOWN_TIMEOUT_SECONDS      tempo máximo para encerramento gracioso do servid
 LOG_FORMAT                    formato dos logs: json ou text
 MAX_RETRIES                   quantidade de novas tentativas após a primeira falha
 RETRY_BACKOFF_SECONDS         base em segundos para o backoff entre tentativas
-DEAD_LETTER_CAPACITY          quantidade máxima de eventos mantidos na dead-letter queue
+DEAD_LETTER_CAPACITY          quantidade máxima de eventos retornados na consulta da dead-letter queue
 DATABASE_PATH                 caminho do arquivo SQLite usado para persistir eventos
 RABBITMQ_URL                  endereço AMQP do RabbitMQ
 RABBITMQ_QUEUE                nome da fila durável no RabbitMQ
@@ -224,7 +224,7 @@ O backoff cresce de forma linear por tentativa:
 3ª falha -> aguarda 3 segundos
 ```
 
-Se todas as tentativas falharem, o evento é marcado como `failed`, registrado nos logs, contabilizado nas métricas e adicionado à dead-letter queue em memória.
+Se todas as tentativas falharem, o evento é marcado como `failed`, registrado nos logs, contabilizado nas métricas e persistido na dead-letter queue do SQLite.
 
 ## Encerramento gracioso
 
