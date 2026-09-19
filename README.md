@@ -151,6 +151,7 @@ RABBITMQ_RECONNECT_MS         espera entre tentativas de reconexão do consumido
 RABBITMQ_CONNECT_TIMEOUT_MS   timeout para cada tentativa de conexão AMQP
 OUTBOX_POLL_INTERVAL_MS        intervalo de consulta da Outbox em milissegundos
 OUTBOX_BATCH_SIZE              quantidade máxima de mensagens lidas por ciclo da Outbox
+OUTBOX_DISPATCH_LEASE_SECONDS  prazo, em segundos, da reserva da mensagem por um dispatcher
 PROCESSING_LEASE_SECONDS       tempo da reserva de processamento antes de expirar
 PROCESSING_REQUEUE_DELAY_MS    espera antes de reenfileirar uma entrega em processamento
 ```
@@ -213,6 +214,8 @@ Antes de executar um evento recebido do RabbitMQ, o worker tenta alterar atomica
 Essa coordenação protege contra workers concorrentes e redeliveries comuns. A garantia continua sendo `at-least-once`: efeitos realizados em sistemas externos também devem usar `event.id` como chave idempotente.
 
 Cada evento novo também gera uma linha na tabela `outbox`, dentro da mesma transação. O dispatcher consulta registros cujo `published_at` está vazio, publica-os e só então registra a data de publicação. Mensagens pendentes sobrevivem à reinicialização da aplicação.
+
+Em múltiplas réplicas, o PostgreSQL reserva cada mensagem com `FOR UPDATE SKIP LOCKED`, um token aleatório e `OUTBOX_DISPATCH_LEASE_SECONDS`. Dessa forma, dispatchers concorrentes recebem lotes distintos; uma reserva abandonada pode ser recuperada após o prazo expirar.
 
 A entrega é `at-least-once`: uma falha depois da publicação e antes da atualização de `published_at` pode causar republicação. Consumidores devem permanecer idempotentes.
 

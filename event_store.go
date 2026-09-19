@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -124,9 +126,56 @@ func (store *EventStore) SaveQueuedWithOutbox(ctx context.Context, event Event) 
 }
 
 type OutboxMessage struct {
-	ID       int64
-	Event    Event
-	Attempts int
+	ID            int64
+	Event         Event
+	Attempts      int
+	DispatchToken string
+}
+
+func (store *EventStore) ClaimPendingOutbox(ctx context.Context, limit int, leaseDuration time.Duration) ([]OutboxMessage, error) {
+	dispatchToken, err := newOutboxDispatchToken()
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+
+	rows, err := store.db.QueryContext(ctx, store.bind(`
+		WITH candidates AS (
+			SELECT id
+			FROM outbox
+			WHERE published_at IS NULL
+			  AND (dispatching_at IS NULL OR dispatching_at <= ?)
+			ORDER BY id ASC
+			FOR UPDATE SKIP LOCKED
+			LIMIT ?
+		)
+		UPDATE outbox
+		SET dispatch_token = ?, dispatching_at = ?
+		FROM candidates
+		WHERE outbox.id = candidates.id
+		RETURNING outbox.id, outbox.event_id, outbox.event_type, outbox.payload, outbox.attempts, outbox.dispatch_token
+	`), now.Add(-leaseDuration), limit, dispatchToken, now)
+	if err != nil {
+		return nil, fmt.Errorf("claim pending outbox messages: %w", err)
+	}
+	defer rows.Close()
+
+	messages := make([]OutboxMessage, 0)
+	for rows.Next() {
+		var message OutboxMessage
+		var payload string
+		if err := rows.Scan(&message.ID, &message.Event.ID, &message.Event.Type, &payload, &message.Attempts, &message.DispatchToken); err != nil {
+			return nil, fmt.Errorf("scan claimed outbox message: %w", err)
+		}
+		if err := json.Unmarshal([]byte(payload), &message.Event.Payload); err != nil {
+			return nil, fmt.Errorf("decode claimed outbox message %d payload: %w", message.ID, err)
+		}
+		messages = append(messages, message)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate claimed outbox messages: %w", err)
+	}
+	return messages, nil
 }
 
 func (store *EventStore) ListPendingOutbox(ctx context.Context, limit int) ([]OutboxMessage, error) {
@@ -160,26 +209,50 @@ func (store *EventStore) ListPendingOutbox(ctx context.Context, limit int) ([]Ou
 	return messages, nil
 }
 
-func (store *EventStore) MarkOutboxPublished(ctx context.Context, messageID int64) error {
-	_, err := store.db.ExecContext(ctx, store.bind(`
-		UPDATE outbox SET published_at = ?, last_error = ''
-		WHERE id = ? AND published_at IS NULL
-	`), time.Now().UTC(), messageID)
+func (store *EventStore) MarkOutboxPublished(ctx context.Context, message OutboxMessage) error {
+	result, err := store.db.ExecContext(ctx, store.bind(`
+		UPDATE outbox
+		SET published_at = ?, last_error = '', dispatch_token = NULL, dispatching_at = NULL
+		WHERE id = ? AND published_at IS NULL AND dispatch_token = ?
+	`), time.Now().UTC(), message.ID, message.DispatchToken)
 	if err != nil {
 		return fmt.Errorf("mark outbox message published: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check published outbox message: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("outbox message %d reservation expired", message.ID)
 	}
 	return nil
 }
 
-func (store *EventStore) MarkOutboxFailed(ctx context.Context, messageID int64, publishError error) error {
-	_, err := store.db.ExecContext(ctx, store.bind(`
-		UPDATE outbox SET attempts = attempts + 1, last_error = ?
-		WHERE id = ? AND published_at IS NULL
-	`), publishError.Error(), messageID)
+func (store *EventStore) MarkOutboxFailed(ctx context.Context, message OutboxMessage, publishError error) error {
+	result, err := store.db.ExecContext(ctx, store.bind(`
+		UPDATE outbox
+		SET attempts = attempts + 1, last_error = ?, dispatch_token = NULL, dispatching_at = NULL
+		WHERE id = ? AND published_at IS NULL AND dispatch_token = ?
+	`), publishError.Error(), message.ID, message.DispatchToken)
 	if err != nil {
 		return fmt.Errorf("mark outbox message failed: %w", err)
 	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check failed outbox message: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("outbox message %d reservation expired", message.ID)
+	}
 	return nil
+}
+
+func newOutboxDispatchToken() (string, error) {
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", fmt.Errorf("generate outbox dispatch token: %w", err)
+	}
+	return hex.EncodeToString(bytes), nil
 }
 func (store *EventStore) ClaimForProcessing(ctx context.Context, eventID string, leaseDuration time.Duration) (EventClaimResult, error) {
 	now := time.Now().UTC()

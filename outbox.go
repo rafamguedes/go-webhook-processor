@@ -8,20 +8,22 @@ import (
 )
 
 type OutboxDispatcher struct {
-	store        *EventStore
-	publisher    EventPublisher
-	pollInterval time.Duration
-	batchSize    int
-	metrics      *Metrics
+	store         *EventStore
+	publisher     EventPublisher
+	pollInterval  time.Duration
+	batchSize     int
+	metrics       *Metrics
+	dispatchLease time.Duration
 }
 
 func NewOutboxDispatcher(store *EventStore, publisher EventPublisher, config Config, metrics *Metrics) *OutboxDispatcher {
 	return &OutboxDispatcher{
-		store:        store,
-		publisher:    publisher,
-		pollInterval: config.OutboxPollInterval(),
-		batchSize:    config.OutboxBatchSize,
-		metrics:      metrics,
+		store:         store,
+		publisher:     publisher,
+		pollInterval:  config.OutboxPollInterval(),
+		batchSize:     config.OutboxBatchSize,
+		metrics:       metrics,
+		dispatchLease: config.OutboxDispatchLease(),
 	}
 }
 
@@ -52,21 +54,21 @@ func (dispatcher *OutboxDispatcher) run(ctx context.Context) {
 }
 
 func (dispatcher *OutboxDispatcher) DispatchPending(ctx context.Context) error {
-	messages, err := dispatcher.store.ListPendingOutbox(ctx, dispatcher.batchSize)
+	messages, err := dispatcher.store.ClaimPendingOutbox(ctx, dispatcher.batchSize, dispatcher.dispatchLease)
 	if err != nil {
 		return err
 	}
 
 	for _, message := range messages {
 		if err := dispatcher.publisher.Publish(ctx, message.Event); err != nil {
-			if markErr := dispatcher.store.MarkOutboxFailed(context.WithoutCancel(ctx), message.ID, err); markErr != nil {
+			if markErr := dispatcher.store.MarkOutboxFailed(context.WithoutCancel(ctx), message, err); markErr != nil {
 				slog.Error("mark outbox publish failure failed", "outbox_id", message.ID, "event_id", message.Event.ID, "error", markErr)
 			}
 			slog.Warn("outbox message publish failed", "outbox_id", message.ID, "event_id", message.Event.ID, "error", err)
 			break
 		}
 
-		if err := dispatcher.store.MarkOutboxPublished(ctx, message.ID); err != nil {
+		if err := dispatcher.store.MarkOutboxPublished(ctx, message); err != nil {
 			return err
 		}
 		dispatcher.metrics.IncEventsQueued()

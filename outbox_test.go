@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 )
 
@@ -63,5 +64,49 @@ func TestOutboxDispatcherMarksMessagePublished(t *testing.T) {
 	}
 	if metrics.Snapshot(0, 1).EventsQueued != 1 {
 		t.Fatal("expected queued metric to be incremented")
+	}
+}
+
+func TestOutboxDispatchersClaimMessageOnlyOnce(t *testing.T) {
+	store := newTestEventStore(t)
+	if err := store.SaveQueuedWithOutbox(t.Context(), testEvent()); err != nil {
+		t.Fatalf("failed to save event with outbox: %v", err)
+	}
+
+	queue := newTestEventQueue(2)
+	config := testConfig()
+	firstDispatcher := NewOutboxDispatcher(store, queue, config, NewMetrics())
+	secondDispatcher := NewOutboxDispatcher(store, queue, config, NewMetrics())
+
+	start := make(chan struct{})
+	dispatchErrors := make(chan error, 2)
+	var waitGroup sync.WaitGroup
+	for _, dispatcher := range []*OutboxDispatcher{firstDispatcher, secondDispatcher} {
+		waitGroup.Add(1)
+		go func(dispatcher *OutboxDispatcher) {
+			defer waitGroup.Done()
+			<-start
+			dispatchErrors <- dispatcher.DispatchPending(t.Context())
+		}(dispatcher)
+	}
+	close(start)
+	waitGroup.Wait()
+	close(dispatchErrors)
+
+	for err := range dispatchErrors {
+		if err != nil {
+			t.Fatalf("failed to dispatch claimed outbox message: %v", err)
+		}
+	}
+	if got := len(queue.events); got != 1 {
+		t.Fatalf("expected exactly 1 publication, got %d", got)
+	}
+
+	pending, err := store.ListPendingOutbox(t.Context(), 10)
+	if err != nil {
+		t.Fatalf("failed to list pending outbox: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("expected no pending messages, got %d", len(pending))
 	}
 }

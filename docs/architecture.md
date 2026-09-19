@@ -13,7 +13,7 @@ flowchart LR
     outbox[(outbox)]
     accepted[202 Accepted]
     dispatcher[OutboxDispatcher]
-    queue[EventQueue<br/>Memory ou RabbitMQ]
+    queue[RabbitMQ]
     workers[Workers concorrentes]
     processor[Processamento]
 
@@ -37,17 +37,17 @@ O registro em `events` e a mensagem em `outbox` são inseridos na mesma transaç
 
 O dispatcher executa continuamente:
 
-1. Busca um lote de mensagens com `published_at IS NULL`.
+1. Reserva um lote de mensagens pendentes com `FOR UPDATE SKIP LOCKED`.
 2. Publica cada evento pela interface `EventPublisher`.
 3. Aguarda a confirmação do RabbitMQ.
-4. Marca a mensagem como publicada.
+4. Marca a mensagem como publicada somente quando o token da reserva ainda pertence ao dispatcher.
 5. Em caso de falha, incrementa `attempts`, registra `last_error` e tenta novamente em outro ciclo.
 
 ## Semântica de entrega
 
 A garantia é `at-least-once`. Se o processo cair depois de o broker confirmar a publicação e antes de o PostgreSQL gravar `published_at`, a mensagem continuará pendente e poderá ser publicada novamente. Por isso, consumidores precisam tratar `event.id` de forma idempotente.
 
-A implementação atual possui um dispatcher por instância. Para executar várias réplicas simultâneas, uma evolução deverá adicionar reivindicação de mensagens ou locking apropriado ao banco usado em produção.
+Várias réplicas podem executar dispatchers simultaneamente. Cada uma reserva lotes distintos usando `FOR UPDATE SKIP LOCKED`, um token aleatório e `OUTBOX_DISPATCH_LEASE_SECONDS`. Caso uma instância pare antes de concluir, a mensagem volta a ser elegível após o prazo da reserva expirar.
 
 ## Inicialização
 
