@@ -61,6 +61,9 @@ func main() {
 	dispatcherContext, stopDispatcher := context.WithCancel(context.Background())
 	var dispatchers sync.WaitGroup
 	NewOutboxDispatcher(app.eventStore, app.eventQueue, config, app.metrics).Start(dispatcherContext, &dispatchers)
+	if config.DLQAutoRetryEnabled {
+		NewDLQRetryScheduler(app.eventStore, config).Start(dispatcherContext, &dispatchers)
+	}
 	server := &http.Server{
 		Addr:              config.ServerAddress(),
 		Handler:           app.routes(),

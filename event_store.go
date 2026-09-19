@@ -301,14 +301,16 @@ func (store *EventStore) SaveDeadLetter(ctx context.Context, event Event, proces
 		return fmt.Errorf("marshal dead letter payload: %w", err)
 	}
 	_, err = store.db.ExecContext(ctx, store.bind(`
-		INSERT INTO dead_letters (event_id, event_type, request_id, payload, error, attempts, failed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO dead_letters (event_id, event_type, request_id, payload, error, attempts, failed_at, next_retry_at, last_retry_error)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(event_id) DO UPDATE SET
 			error = excluded.error,
 			attempts = excluded.attempts,
 			failed_at = excluded.failed_at,
+			next_retry_at = CURRENT_TIMESTAMP,
+			last_retry_error = excluded.last_retry_error,
 			replayed_at = NULL
-	`), event.ID, event.Type, event.RequestID, string(payload), processingError.Error(), attempts, time.Now().UTC())
+	`), event.ID, event.Type, event.RequestID, string(payload), processingError.Error(), attempts, time.Now().UTC(), time.Now().UTC(), processingError.Error())
 	if err != nil {
 		return fmt.Errorf("save dead letter: %w", err)
 	}
@@ -373,6 +375,56 @@ func (store *EventStore) ReplayDeadLetter(ctx context.Context, eventID string) e
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit dead letter replay: %w", err)
+	}
+	return nil
+}
+
+func (store *EventStore) ClaimRetryableDeadLetters(ctx context.Context, limit, maxAttempts int) ([]string, error) {
+	rows, err := store.db.QueryContext(ctx, store.bind(`
+		WITH candidates AS (
+			SELECT event_id
+			FROM dead_letters
+			WHERE replayed_at IS NULL
+			  AND next_retry_at IS NOT NULL
+			  AND next_retry_at <= ?
+			  AND replay_attempts < ?
+			ORDER BY next_retry_at ASC, event_id ASC
+			FOR UPDATE SKIP LOCKED
+			LIMIT ?
+		)
+		UPDATE dead_letters
+		SET replay_attempts = replay_attempts + 1, next_retry_at = NULL
+		FROM candidates
+		WHERE dead_letters.event_id = candidates.event_id
+		RETURNING dead_letters.event_id
+	`), time.Now().UTC(), maxAttempts, limit)
+	if err != nil {
+		return nil, fmt.Errorf("claim retryable dead letters: %w", err)
+	}
+	defer rows.Close()
+
+	eventIDs := make([]string, 0)
+	for rows.Next() {
+		var eventID string
+		if err := rows.Scan(&eventID); err != nil {
+			return nil, fmt.Errorf("scan retryable dead letter: %w", err)
+		}
+		eventIDs = append(eventIDs, eventID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate retryable dead letters: %w", err)
+	}
+	return eventIDs, nil
+}
+
+func (store *EventStore) RescheduleDeadLetterRetry(ctx context.Context, eventID string, retryError error) error {
+	_, err := store.db.ExecContext(ctx, store.bind(`
+		UPDATE dead_letters
+		SET next_retry_at = ?, last_retry_error = ?
+		WHERE event_id = ? AND replayed_at IS NULL
+	`), time.Now().UTC(), retryError.Error(), eventID)
+	if err != nil {
+		return fmt.Errorf("reschedule dead letter retry: %w", err)
 	}
 	return nil
 }
