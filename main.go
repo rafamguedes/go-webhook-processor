@@ -62,7 +62,7 @@ func main() {
 	var dispatchers sync.WaitGroup
 	NewOutboxDispatcher(app.eventStore, app.eventQueue, config, app.metrics).Start(dispatcherContext, &dispatchers)
 	if config.DLQAutoRetryEnabled {
-		NewDLQRetryScheduler(app.eventStore, config).Start(dispatcherContext, &dispatchers)
+		NewDLQRetryScheduler(app.eventStore, config, app.metrics).Start(dispatcherContext, &dispatchers)
 	}
 	server := &http.Server{
 		Addr:              config.ServerAddress(),

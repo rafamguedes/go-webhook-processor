@@ -11,13 +11,15 @@ type DLQRetryScheduler struct {
 	store       *EventStore
 	interval    time.Duration
 	maxAttempts int
+	metrics     *Metrics
 }
 
-func NewDLQRetryScheduler(store *EventStore, config Config) *DLQRetryScheduler {
+func NewDLQRetryScheduler(store *EventStore, config Config, metrics *Metrics) *DLQRetryScheduler {
 	return &DLQRetryScheduler{
 		store:       store,
 		interval:    time.Duration(config.DLQAutoRetryIntervalSeconds) * time.Second,
 		maxAttempts: config.DLQAutoRetryMaxAttempts,
+		metrics:     metrics,
 	}
 }
 
@@ -54,7 +56,13 @@ func (scheduler *DLQRetryScheduler) retry(ctx context.Context) {
 		return
 	}
 	for _, eventID := range eventIDs {
+		if scheduler.metrics != nil {
+			scheduler.metrics.IncDeadLetterAutoRetries()
+		}
 		if err := scheduler.store.ReplayDeadLetter(ctx, eventID); err != nil {
+			if scheduler.metrics != nil {
+				scheduler.metrics.IncDeadLetterAutoRetryFailed()
+			}
 			slog.Error("automatic dead letter replay failed", "event_id", eventID, "error", err)
 			if rescheduleErr := scheduler.store.RescheduleDeadLetterRetry(ctx, eventID, err); rescheduleErr != nil {
 				slog.Error("reschedule automatic dead letter replay failed", "event_id", eventID, "error", rescheduleErr)
