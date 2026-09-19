@@ -72,3 +72,24 @@ jobs:
 
       - name: Run tests
         run: go test -race ./...
+
+  resilience:
+    name: Resilience smoke tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Run RabbitMQ recovery smoke test
+        shell: pwsh
+        run: ./scripts/resilience-smoke.ps1 -RecoveryWaitSeconds 20
+
+      - name: Run PostgreSQL recovery smoke test
+        shell: pwsh
+        run: ./scripts/postgres-resilience-smoke.ps1 -RecoveryWaitSeconds 20
+
+      - name: Tear down resilience environment
+        if: always()
+        run: docker compose down --volumes --remove-orphans
