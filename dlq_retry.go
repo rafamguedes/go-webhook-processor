@@ -50,25 +50,37 @@ func (scheduler *DLQRetryScheduler) run(ctx context.Context) {
 }
 
 func (scheduler *DLQRetryScheduler) retry(ctx context.Context) {
-	eventIDs, err := scheduler.store.ClaimRetryableDeadLetters(ctx, 10, scheduler.maxAttempts)
+	items, err := scheduler.store.ClaimRetryableDeadLetterDetails(ctx, 10, scheduler.maxAttempts)
 	if err != nil {
 		slog.Error("claim dead letters for automatic retry failed", "error", err)
 		return
 	}
-	for _, eventID := range eventIDs {
+	for _, item := range items {
 		if scheduler.metrics != nil {
 			scheduler.metrics.IncDeadLetterAutoRetries()
 		}
-		if err := scheduler.store.ReplayDeadLetter(ctx, eventID); err != nil {
+		if err := scheduler.store.ReplayDeadLetter(ctx, item.EventID); err != nil {
 			if scheduler.metrics != nil {
 				scheduler.metrics.IncDeadLetterAutoRetryFailed()
 			}
-			slog.Error("automatic dead letter replay failed", "event_id", eventID, "error", err)
-			if rescheduleErr := scheduler.store.RescheduleDeadLetterRetry(ctx, eventID, err); rescheduleErr != nil {
-				slog.Error("reschedule automatic dead letter replay failed", "event_id", eventID, "error", rescheduleErr)
+			slog.Error("automatic dead letter replay failed", "event_id", item.EventID, "error", err)
+			delay := scheduler.retryDelay(item.ReplayAttempt)
+			if rescheduleErr := scheduler.store.RescheduleDeadLetterRetryWithDelay(ctx, item.EventID, err, delay); rescheduleErr != nil {
+				slog.Error("reschedule automatic dead letter replay failed", "event_id", item.EventID, "error", rescheduleErr)
 			}
 			continue
 		}
-		slog.Info("automatic dead letter replay accepted", "event_id", eventID)
+		slog.Info("automatic dead letter replay accepted", "event_id", item.EventID, "replay_attempt", item.ReplayAttempt)
 	}
+}
+
+func (scheduler *DLQRetryScheduler) retryDelay(attempt int) time.Duration {
+	delay := scheduler.interval
+	for step := 1; step < attempt; step++ {
+		delay *= 2
+		if delay >= 24*time.Hour {
+			return 24 * time.Hour
+		}
+	}
+	return delay
 }
