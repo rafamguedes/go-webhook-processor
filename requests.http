@@ -18,7 +18,7 @@ POST {{baseUrl}}/events
 Content-Type: application/json
 
 {
-  "id": "evt-001",
+  "id": "evt-0011",
   "type": "payment.created",
   "payload": {
     "amount": 100,
@@ -79,7 +79,7 @@ Content-Type: application/json
 
 ### Reprocessar uma dead letter pela API interna
 # O token deve ser igual a DLQ_REPLAY_TOKEN no .env.
-POST {{baseUrl}}/internal/dead-letters/evt-fail-00111/replay
+POST {{baseUrl}}/internal/dead-letters/evt-fail-001/replay
 Authorization: Bearer local-dev-replay-token
 
 ### Cenário DLQ: consultar após o retry/backoff

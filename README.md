@@ -167,7 +167,7 @@ O PostgreSQL oferece concorrência de leitura e escrita adequada para a aplicaç
 
 O esquema é controlado por migrações SQL versionadas em `migrations/`. A aplicação não altera o banco ao iniciar: execute o comando abaixo antes de iniciar uma nova versão do serviço.
 
-```powershell
+````powershell
 go run . migrate
 ```
 
@@ -270,7 +270,7 @@ Ao receber o sinal, o serviço:
 
 ## Execução local
 
-```powershell
+````powershell
 go run .
 ```
 
@@ -284,7 +284,7 @@ http://localhost:8080
 
 O Compose inicia PostgreSQL, RabbitMQ, o serviço pontual `migrate` e, após a migração concluir, a aplicação. Copie `.env.example` para `.env` e altere as credenciais de desenvolvimento antes de compartilhar o ambiente.
 
-```powershell
+````powershell
 Copy-Item .env.example .env
 docker compose up -d --build
 ```
@@ -301,13 +301,13 @@ O RabbitMQ é a fila obrigatória da aplicação. O adaptador declara uma fila d
 
 Build isolado da imagem:
 
-```powershell
+````powershell
 docker build -t go-webhook-processor:local .
 ```
 
 Executar o container conectado ao PostgreSQL:
 
-```powershell
+````powershell
 docker run --rm `
   -p 8080:8080 `
   -e PORT=8080 `
@@ -319,17 +319,23 @@ docker run --rm `
 
 O container conecta ao PostgreSQL do Compose pela variável `DATABASE_URL`.
 
+A imagem possui um `HEALTHCHECK` baseado no endpoint `/ready`. Para consultar o estado do container:
+
+```powershell
+docker inspect --format='{{.State.Health.Status}}' go-webhook-processor
+```
+
 ## Testes
 
 Os testes de persistência usam um banco PostgreSQL exclusivo. Crie-o uma vez no ambiente local:
 
-```powershell
+````powershell
 docker compose exec postgres createdb -U webhook webhook_test
 ```
 
 Depois configure a conexão e execute os testes:
 
-```powershell
+````powershell
 $env:TEST_DATABASE_URL = "postgres://webhook:webhook_dev@localhost:5432/webhook_test?sslmode=disable"
 go test ./...
 ```
@@ -338,7 +344,7 @@ A pipeline cria esse banco automaticamente antes da execução dos testes.
 
 ## Build
 
-```powershell
+````powershell
 go build .
 ```
 
@@ -348,20 +354,20 @@ Eventos marcados como `failed` podem ser reprocessados manualmente pelo comando 
 
 Para execução local, com PostgreSQL disponível em `localhost:5432`:
 
-```powershell
+````powershell
 go run . replay-dead-letter <event-id>
 ```
 
 Quando a aplicação estiver rodando pelo Docker Compose, use o endpoint HTTP autenticado ou execute o comando com `DATABASE_URL` apontando para `localhost:5432`.
 
-```powershell
+````powershell
 $env:DATABASE_URL = "postgres://webhook:webhook_dev@localhost:5432/webhook?sslmode=disable"
 go run . replay-dead-letter <event-id>
 ```
 
 O fluxo recomendado é usar o endpoint HTTP autenticado. O comando CLI permanece disponível para operações internas:
 
-```powershell
+````powershell
 docker compose run --rm --no-deps webhook-processor replay-dead-letter <event-id>
 ```
 
@@ -376,14 +382,14 @@ Depois que o serviço for iniciado novamente, o dispatcher publica a mensagem re
 
 Os comandos abaixo são destrutivos. Eles removem os volumes do PostgreSQL e do RabbitMQ, os containers e recriam a aplicação do zero:
 
-```powershell
+````powershell
 docker compose down --volumes --remove-orphans
 docker compose up -d --build
 ```
 
 Para acompanhar a inicialização:
 
-```powershell
+````powershell
 docker compose logs -f webhook-processor
 ```
 
@@ -391,7 +397,7 @@ docker compose logs -f webhook-processor
 
 Use esta opção quando quiser recriar apenas o banco PostgreSQL e preservar o RabbitMQ:
 
-```powershell
+````powershell
 docker compose stop webhook-processor postgres
 docker compose rm -f postgres
 $volume = docker volume ls -q -f name=postgres-data
@@ -409,6 +415,7 @@ O arquivo [`requests.http`](requests.http) contém chamadas prontas para uso com
 A aplicação oferece:
 
 - endpoint `/health`
+- endpoint `/ready` usado pelo healthcheck do container
 - endpoint `/metrics`
 - endpoint `/dead-letters`
 - logs estruturados com `slog`
