@@ -23,7 +23,7 @@ Esse padrão é útil para:
 Cliente externo
   -> POST /events
     -> validação do JSON
-      -> transação SQLite: events + outbox
+      -> transação PostgreSQL: events + outbox
         -> resposta HTTP 202 Accepted
           -> dispatcher lê mensagens pendentes
             -> RabbitMQ / EventQueue
@@ -57,7 +57,7 @@ Retorna um snapshot dos principais contadores operacionais da aplicação.
 
 ### GET /dead-letters
 
-Retorna os eventos que falharam permanentemente após esgotar as tentativas de retry. Este endpoint consulta falhas permanentes persistidas no SQLite, mesmo após a reinicialização da aplicação.
+Retorna os eventos que falharam permanentemente após esgotar as tentativas de retry. Este endpoint consulta falhas permanentes persistidas no PostgreSQL, mesmo após a reinicialização da aplicação.
 
 ### POST /internal/dead-letters/{event-id}/replay
 
@@ -95,7 +95,7 @@ app.go              estado da aplicação, dependências e registro das rotas
 queue.go            contratos de publicação, consumo e entrega de eventos
 models.go           contratos de entrada e saída usados pela API
 metrics.go          contadores thread-safe e snapshot de métricas
-event_store.go      persistência SQLite, estados, idempotência e tabela Outbox
+event_store.go      persistência PostgreSQL, estados, idempotência e tabela Outbox
 rabbitmq_queue.go   implementação durável da EventQueue com RabbitMQ
 deadletter.go       contrato e implementações da dead-letter persistente e de teste
 handlers.go         handlers HTTP, validação, persistência e respostas JSON
@@ -122,7 +122,7 @@ LOG_FORMAT=json
 MAX_RETRIES=3
 RETRY_BACKOFF_SECONDS=1
 DEAD_LETTER_CAPACITY=100
-DATABASE_PATH=./events.db
+DATABASE_URL=postgres://webhook:webhook_dev@localhost:5432/webhook?sslmode=disable
 RABBITMQ_URL=amqp://webhook:webhook_dev@localhost:5672/
 RABBITMQ_QUEUE=webhook.events
 RABBITMQ_RECONNECT_MS=1000
@@ -141,7 +141,7 @@ LOG_FORMAT                    formato dos logs: json ou text
 MAX_RETRIES                   quantidade de novas tentativas após a primeira falha
 RETRY_BACKOFF_SECONDS         base em segundos para o backoff entre tentativas
 DEAD_LETTER_CAPACITY          quantidade máxima de eventos retornados na consulta da dead-letter queue
-DATABASE_PATH                 caminho do arquivo SQLite usado para persistir eventos
+DATABASE_URL                  URL de conexão com o PostgreSQL usado para persistir eventos
 DLQ_REPLAY_TOKEN              token Bearer exigido pelo endpoint interno de replay da DLQ
 RABBITMQ_URL                  endereço AMQP do RabbitMQ
 RABBITMQ_QUEUE                nome da fila durável no RabbitMQ
@@ -155,8 +155,8 @@ PROCESSING_REQUEUE_DELAY_MS    espera antes de reenfileirar uma entrega em proce
 
 ## Persistência
 
-A aplicação usa SQLite para persistir o histórico operacional dos eventos recebidos.
-A conexão SQLite usa `busy_timeout` de 5 segundos e o modo de journal `WAL`. Assim, uma operação de escrita aguarda brevemente a liberação do banco em vez de falhar imediatamente com `SQLITE_BUSY`, enquanto leituras podem continuar com menor interferência.
+A aplicação usa PostgreSQL para persistir o histórico operacional dos eventos recebidos.
+O PostgreSQL oferece concorrência de leitura e escrita adequada para a aplicação, mantendo a consistência transacional da Outbox, dos eventos e da DLQ.
 
 Cada evento aceito é salvo inicialmente como `queued`. Quando um worker adquire a reserva, o status passa para:
 
@@ -188,7 +188,7 @@ Se o mesmo `event.id` for recebido novamente, a aplicação rejeita o evento com
 
 Isso evita processamento duplicado em cenários comuns de webhook, nos quais o sistema externo pode reenviar o mesmo evento por timeout, falha de rede ou política própria de retry.
 
-A deduplicação é persistente: a chave primária `events.id` no SQLite impede que o mesmo evento seja aceito novamente, inclusive após a reinicialização da aplicação.
+A deduplicação é persistente: a chave primária `events.id` no PostgreSQL impede que o mesmo evento seja aceito novamente, inclusive após a reinicialização da aplicação.
 ### Idempotência no consumidor
 
 Antes de executar um evento recebido do RabbitMQ, o worker tenta alterar atomicamente seu estado de `queued` para `processing`. Apenas o worker que modificar a linha ganha o direito de executar o processamento.
@@ -196,7 +196,7 @@ Antes de executar um evento recebido do RabbitMQ, o worker tenta alterar atomica
 - `processed` ou `failed`: a redelivery é ignorada e recebe ACK.
 - `processing` com lease válido: a entrega recebe NACK com requeue após uma pequena espera.
 - `processing` com lease expirado: outro worker pode reservar e recuperar o processamento.
-- evento inexistente no SQLite: a entrega é rejeitada sem requeue.
+- evento inexistente no PostgreSQL: a entrega é rejeitada sem requeue.
 
 Essa coordenação protege contra workers concorrentes e redeliveries comuns. A garantia continua sendo `at-least-once`: efeitos realizados em sistemas externos também devem usar `event.id` como chave idempotente.
 
@@ -234,7 +234,7 @@ O backoff cresce de forma linear por tentativa:
 3ª falha -> aguarda 3 segundos
 ```
 
-Se todas as tentativas falharem, o evento é marcado como `failed`, registrado nos logs, contabilizado nas métricas e persistido na dead-letter queue do SQLite.
+Se todas as tentativas falharem, o evento é marcado como `failed`, registrado nos logs, contabilizado nas métricas e persistido na dead-letter queue do PostgreSQL.
 
 ## Encerramento gracioso
 
@@ -263,7 +263,7 @@ http://localhost:8080
 
 ## Docker
 
-O Compose inicia a aplicação, o SQLite persistido e o RabbitMQ com painel de gerenciamento. Copie `.env.example` para `.env` e altere as credenciais de desenvolvimento antes de compartilhar o ambiente.
+O Compose inicia a aplicação, o PostgreSQL persistido e o RabbitMQ com painel de gerenciamento. Copie `.env.example` para `.env` e altere as credenciais de desenvolvimento antes de compartilhar o ambiente.
 
 ```powershell
 Copy-Item .env.example .env
@@ -286,7 +286,7 @@ Build isolado da imagem:
 docker build -t go-webhook-processor:local .
 ```
 
-Executar o container com volume para persistir o SQLite:
+Executar o container conectado ao PostgreSQL:
 
 ```powershell
 docker run --rm `
@@ -298,17 +298,24 @@ docker run --rm `
   go-webhook-processor:local
 ```
 
-No container, o banco usa por padrão:
-
-```text
-/data/events.db
-```
+O container conecta ao PostgreSQL do Compose pela variável `DATABASE_URL`.
 
 ## Testes
 
+Os testes de persistência usam um banco PostgreSQL exclusivo. Crie-o uma vez no ambiente local:
+
 ```powershell
+docker compose exec postgres createdb -U webhook webhook_test
+```
+
+Depois configure a conexão e execute os testes:
+
+```powershell
+$env:TEST_DATABASE_URL = "postgres://webhook:webhook_dev@localhost:5432/webhook_test?sslmode=disable"
 go test ./...
 ```
+
+A pipeline cria esse banco automaticamente antes da execução dos testes.
 
 ## Build
 
@@ -320,43 +327,38 @@ go build .
 
 Eventos marcados como `failed` podem ser reprocessados manualmente pelo comando interno:
 
-Para execução local, usando o banco padrão `./events.db`:
+Para execução local, com PostgreSQL disponível em `localhost:5432`:
 
 ```powershell
 go run . replay-dead-letter <event-id>
 ```
 
-Quando a aplicação estiver rodando pelo Docker Compose, o banco real está em `./data/events.db`. Nesse caso, pare temporariamente o container da aplicação, execute o comando apontando para o mesmo arquivo e suba o serviço novamente:
+Quando a aplicação estiver rodando pelo Docker Compose, use o endpoint HTTP autenticado ou execute o comando com `DATABASE_URL` apontando para `localhost:5432`.
 
 ```powershell
-docker compose stop webhook-processor
-$env:DATABASE_PATH = "./data/events.db"
+$env:DATABASE_URL = "postgres://webhook:webhook_dev@localhost:5432/webhook?sslmode=disable"
 go run . replay-dead-letter <event-id>
-docker compose up -d webhook-processor
 ```
 
-Também é possível executar o comando usando a imagem da aplicação:
+O fluxo recomendado é usar o endpoint HTTP autenticado. O comando CLI permanece disponível para operações internas:
 
 ```powershell
-docker compose stop webhook-processor
 docker compose run --rm --no-deps webhook-processor replay-dead-letter <event-id>
-docker compose up -d webhook-processor
 ```
 
-O comando executa uma transação no SQLite e somente aceita um evento que esteja em `failed`. Nessa transação, o evento volta para `queued`, suas tentativas são zeradas, a mensagem correspondente da Outbox é reaberta e a falha recebe `replayed_at`. O registro original da DLQ não é apagado, preservando o histórico operacional.
+O comando executa uma transação no PostgreSQL e somente aceita um evento que esteja em `failed`. Nessa transação, o evento volta para `queued`, suas tentativas são zeradas, a mensagem correspondente da Outbox é reaberta e a falha recebe `replayed_at`. O registro original da DLQ não é apagado, preservando o histórico operacional.
 
 Depois que o serviço for iniciado novamente, o dispatcher publica a mensagem reaberta no RabbitMQ. O comando não inicia o servidor HTTP nem precisa abrir uma conexão com o broker.
 
 `replayed_at` é apenas uma marca de auditoria. Se o evento falhar novamente, a marca é limpa e a falha mais recente passa a representar o estado atual do evento.
 ## Reset do ambiente Docker
 
-### Reset completo: SQLite e RabbitMQ
+### Reset completo: PostgreSQL e RabbitMQ
 
-Os comandos abaixo são destrutivos. Eles removem o banco SQLite, o volume persistente do RabbitMQ, os containers e recriam a aplicação do zero:
+Os comandos abaixo são destrutivos. Eles removem os volumes do PostgreSQL e do RabbitMQ, os containers e recriam a aplicação do zero:
 
 ```powershell
 docker compose down --volumes --remove-orphans
-Remove-Item -LiteralPath .\data\events.db -Force -ErrorAction SilentlyContinue
 docker compose up -d --build
 ```
 
@@ -366,17 +368,19 @@ Para acompanhar a inicialização:
 docker compose logs -f webhook-processor
 ```
 
-### Reset apenas do SQLite
+### Reset apenas do PostgreSQL
 
-Use esta opção quando quiser preservar usuários, exchanges, filas e mensagens do RabbitMQ:
+Use esta opção quando quiser recriar apenas o banco PostgreSQL e preservar o RabbitMQ:
 
 ```powershell
-docker compose stop webhook-processor
-Remove-Item -LiteralPath .\data\events.db -Force -ErrorAction SilentlyContinue
-docker compose up -d --build webhook-processor
+docker compose stop webhook-processor postgres
+docker compose rm -f postgres
+$volume = docker volume ls -q -f name=postgres-data
+if ($volume) { docker volume rm $volume }
+docker compose up -d --build
 ```
 
-O diretório `./data` é recriado automaticamente pelo bind mount quando o container iniciar.
+O comando remove somente o volume do PostgreSQL e preserva o volume do RabbitMQ.
 ## Testes pela IDE
 
 O arquivo [`requests.http`](requests.http) contém chamadas prontas para uso com a extensão REST Client do VS Code.
@@ -389,6 +393,6 @@ A aplicação oferece:
 - endpoint `/metrics`
 - endpoint `/dead-letters`
 - logs estruturados com `slog`
-- status persistido em SQLite
+- status persistido em PostgreSQL
 
 

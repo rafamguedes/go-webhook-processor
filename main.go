@@ -20,7 +20,7 @@ func main() {
 	}
 	setupLogger(config)
 
-	eventStore, err := OpenEventStore(config.DatabasePath)
+	eventStore, err := OpenEventStore(config.DatabaseURL)
 	if err != nil {
 		slog.Error("open event store failed", "error", err)
 		os.Exit(1)

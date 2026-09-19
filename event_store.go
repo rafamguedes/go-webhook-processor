@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 var ErrEventAlreadyExists = errors.New("event already exists")
@@ -47,10 +47,8 @@ type EventStore struct {
 	db *sql.DB
 }
 
-const sqliteBusyTimeoutMs = 5000
-
-func OpenEventStore(databasePath string) (*EventStore, error) {
-	db, err := sql.Open("sqlite", sqliteDSN(databasePath))
+func OpenEventStore(databaseURL string) (*EventStore, error) {
+	db, err := sql.Open("pgx", databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("open event store: %w", err)
 	}
@@ -64,12 +62,18 @@ func OpenEventStore(databasePath string) (*EventStore, error) {
 	return store, nil
 }
 
-func sqliteDSN(databasePath string) string {
-	separator := "?"
-	if strings.Contains(databasePath, "?") {
-		separator = "&"
+func (store *EventStore) bind(query string) string {
+	var builder strings.Builder
+	placeholder := 1
+	for _, character := range query {
+		if character == '?' {
+			builder.WriteString(fmt.Sprintf("$%d", placeholder))
+			placeholder++
+			continue
+		}
+		builder.WriteRune(character)
 	}
-	return fmt.Sprintf("%s%s_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)", databasePath, separator, sqliteBusyTimeoutMs)
+	return builder.String()
 }
 
 func (store *EventStore) Close() error {
@@ -89,11 +93,11 @@ func (store *EventStore) SaveQueuedWithOutbox(ctx context.Context, event Event) 
 	defer tx.Rollback()
 
 	now := time.Now().UTC()
-	result, err := tx.ExecContext(ctx, `
+	result, err := tx.ExecContext(ctx, store.bind(`
 		INSERT INTO events (id, type, payload, status, attempts, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO NOTHING
-	`, event.ID, event.Type, string(payload), EventStatusQueued, 0, now, now)
+	`), event.ID, event.Type, string(payload), EventStatusQueued, 0, now, now)
 	if err != nil {
 		return fmt.Errorf("save queued event: %w", err)
 	}
@@ -106,10 +110,10 @@ func (store *EventStore) SaveQueuedWithOutbox(ctx context.Context, event Event) 
 		return ErrEventAlreadyExists
 	}
 
-	_, err = tx.ExecContext(ctx, `
+	_, err = tx.ExecContext(ctx, store.bind(`
 		INSERT INTO outbox (event_id, event_type, payload, attempts, created_at)
 		VALUES (?, ?, ?, 0, ?)
-	`, event.ID, event.Type, string(payload), now)
+	`), event.ID, event.Type, string(payload), now)
 	if err != nil {
 		return fmt.Errorf("save outbox message: %w", err)
 	}
@@ -127,13 +131,13 @@ type OutboxMessage struct {
 }
 
 func (store *EventStore) ListPendingOutbox(ctx context.Context, limit int) ([]OutboxMessage, error) {
-	rows, err := store.db.QueryContext(ctx, `
+	rows, err := store.db.QueryContext(ctx, store.bind(`
 		SELECT id, event_id, event_type, payload, attempts
 		FROM outbox
 		WHERE published_at IS NULL
 		ORDER BY id ASC
 		LIMIT ?
-	`, limit)
+	`), limit)
 	if err != nil {
 		return nil, fmt.Errorf("list pending outbox messages: %w", err)
 	}
@@ -158,10 +162,10 @@ func (store *EventStore) ListPendingOutbox(ctx context.Context, limit int) ([]Ou
 }
 
 func (store *EventStore) MarkOutboxPublished(ctx context.Context, messageID int64) error {
-	_, err := store.db.ExecContext(ctx, `
+	_, err := store.db.ExecContext(ctx, store.bind(`
 		UPDATE outbox SET published_at = ?, last_error = ''
 		WHERE id = ? AND published_at IS NULL
-	`, time.Now().UTC(), messageID)
+	`), time.Now().UTC(), messageID)
 	if err != nil {
 		return fmt.Errorf("mark outbox message published: %w", err)
 	}
@@ -169,10 +173,10 @@ func (store *EventStore) MarkOutboxPublished(ctx context.Context, messageID int6
 }
 
 func (store *EventStore) MarkOutboxFailed(ctx context.Context, messageID int64, publishError error) error {
-	_, err := store.db.ExecContext(ctx, `
+	_, err := store.db.ExecContext(ctx, store.bind(`
 		UPDATE outbox SET attempts = attempts + 1, last_error = ?
 		WHERE id = ? AND published_at IS NULL
-	`, publishError.Error(), messageID)
+	`), publishError.Error(), messageID)
 	if err != nil {
 		return fmt.Errorf("mark outbox message failed: %w", err)
 	}
@@ -181,7 +185,7 @@ func (store *EventStore) MarkOutboxFailed(ctx context.Context, messageID int64, 
 func (store *EventStore) ClaimForProcessing(ctx context.Context, eventID string, leaseDuration time.Duration) (EventClaimResult, error) {
 	now := time.Now().UTC()
 	leaseExpiredBefore := now.Add(-leaseDuration)
-	result, err := store.db.ExecContext(ctx, `
+	result, err := store.db.ExecContext(ctx, store.bind(`
 		UPDATE events
 		SET status = ?, processing_started_at = ?, updated_at = ?
 		WHERE id = ?
@@ -189,7 +193,7 @@ func (store *EventStore) ClaimForProcessing(ctx context.Context, eventID string,
 			status = ?
 			OR (status = ? AND processing_started_at <= ?)
 		  )
-	`, EventStatusProcessing, now, now, eventID, EventStatusQueued, EventStatusProcessing, leaseExpiredBefore)
+	`), EventStatusProcessing, now, now, eventID, EventStatusQueued, EventStatusProcessing, leaseExpiredBefore)
 	if err != nil {
 		return EventClaimMissing, fmt.Errorf("claim event for processing: %w", err)
 	}
@@ -203,7 +207,7 @@ func (store *EventStore) ClaimForProcessing(ctx context.Context, eventID string,
 	}
 
 	var status string
-	if err := store.db.QueryRowContext(ctx, `SELECT status FROM events WHERE id = ?`, eventID).Scan(&status); err != nil {
+	if err := store.db.QueryRowContext(ctx, store.bind(`SELECT status FROM events WHERE id = ?`), eventID).Scan(&status); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return EventClaimMissing, nil
 		}
@@ -224,7 +228,7 @@ func (store *EventStore) SaveDeadLetter(ctx context.Context, event Event, proces
 	if err != nil {
 		return fmt.Errorf("marshal dead letter payload: %w", err)
 	}
-	_, err = store.db.ExecContext(ctx, `
+	_, err = store.db.ExecContext(ctx, store.bind(`
 		INSERT INTO dead_letters (event_id, event_type, payload, error, attempts, failed_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(event_id) DO UPDATE SET
@@ -232,7 +236,7 @@ func (store *EventStore) SaveDeadLetter(ctx context.Context, event Event, proces
 			attempts = excluded.attempts,
 			failed_at = excluded.failed_at,
 			replayed_at = NULL
-	`, event.ID, event.Type, string(payload), processingError.Error(), attempts, time.Now().UTC())
+	`), event.ID, event.Type, string(payload), processingError.Error(), attempts, time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("save dead letter: %w", err)
 	}
@@ -247,12 +251,12 @@ func (store *EventStore) ReplayDeadLetter(ctx context.Context, eventID string) e
 	defer tx.Rollback()
 
 	var status, eventType, payload string
-	if err := tx.QueryRowContext(ctx, `
+	if err := tx.QueryRowContext(ctx, store.bind(`
 		SELECT e.status, e.type, e.payload
 		FROM events e
 		JOIN dead_letters d ON d.event_id = e.id
 		WHERE e.id = ?
-	`, eventID).Scan(&status, &eventType, &payload); err != nil {
+	`), eventID).Scan(&status, &eventType, &payload); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrDeadLetterNotFound
 		}
@@ -263,19 +267,19 @@ func (store *EventStore) ReplayDeadLetter(ctx context.Context, eventID string) e
 	}
 
 	now := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, store.bind(`
 		UPDATE events
 		SET status = ?, attempts = 0, error = '', processing_started_at = NULL, updated_at = ?
 		WHERE id = ? AND status = ?
-	`, EventStatusQueued, now, eventID, EventStatusFailed); err != nil {
+	`), EventStatusQueued, now, eventID, EventStatusFailed); err != nil {
 		return fmt.Errorf("reset event for dead letter replay: %w", err)
 	}
 
-	result, err := tx.ExecContext(ctx, `
+	result, err := tx.ExecContext(ctx, store.bind(`
 		UPDATE outbox
 		SET attempts = 0, last_error = '', published_at = NULL
 		WHERE event_id = ?
-	`, eventID)
+	`), eventID)
 	if err != nil {
 		return fmt.Errorf("reopen outbox message: %w", err)
 	}
@@ -284,15 +288,15 @@ func (store *EventStore) ReplayDeadLetter(ctx context.Context, eventID string) e
 		return fmt.Errorf("check reopened outbox message: %w", err)
 	}
 	if rowsAffected == 0 {
-		if _, err := tx.ExecContext(ctx, `
+		if _, err := tx.ExecContext(ctx, store.bind(`
 			INSERT INTO outbox (event_id, event_type, payload, attempts, created_at)
 			VALUES (?, ?, ?, 0, ?)
-		`, eventID, eventType, payload, now); err != nil {
+		`), eventID, eventType, payload, now); err != nil {
 			return fmt.Errorf("create outbox message for replay: %w", err)
 		}
 	}
 
-	if _, err := tx.ExecContext(ctx, `UPDATE dead_letters SET replayed_at = ? WHERE event_id = ?`, now, eventID); err != nil {
+	if _, err := tx.ExecContext(ctx, store.bind(`UPDATE dead_letters SET replayed_at = ? WHERE event_id = ?`), now, eventID); err != nil {
 		return fmt.Errorf("mark dead letter replayed: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -301,12 +305,12 @@ func (store *EventStore) ReplayDeadLetter(ctx context.Context, eventID string) e
 	return nil
 }
 func (store *EventStore) ListDeadLetters(ctx context.Context, limit int) ([]DeadLetter, error) {
-	rows, err := store.db.QueryContext(ctx, `
+	rows, err := store.db.QueryContext(ctx, store.bind(`
 		SELECT event_id, event_type, payload, error, attempts, failed_at, replayed_at
 		FROM dead_letters
 		ORDER BY failed_at DESC
 		LIMIT ?
-	`, limit)
+	`), limit)
 	if err != nil {
 		return nil, fmt.Errorf("list dead letters: %w", err)
 	}
@@ -335,11 +339,11 @@ func (store *EventStore) ListDeadLetters(ctx context.Context, limit int) ([]Dead
 }
 func (store *EventStore) MarkProcessed(ctx context.Context, eventID string, attempts int) error {
 	now := time.Now().UTC()
-	_, err := store.db.ExecContext(ctx, `
+	_, err := store.db.ExecContext(ctx, store.bind(`
 		UPDATE events
 		SET status = ?, attempts = ?, error = '', processing_started_at = NULL, updated_at = ?
 		WHERE id = ?
-	`, EventStatusProcessed, attempts, now, eventID)
+	`), EventStatusProcessed, attempts, now, eventID)
 	if err != nil {
 		return fmt.Errorf("mark event processed: %w", err)
 	}
@@ -349,11 +353,11 @@ func (store *EventStore) MarkProcessed(ctx context.Context, eventID string, atte
 
 func (store *EventStore) MarkFailed(ctx context.Context, eventID string, attempts int, processingError error) error {
 	now := time.Now().UTC()
-	_, err := store.db.ExecContext(ctx, `
+	_, err := store.db.ExecContext(ctx, store.bind(`
 		UPDATE events
 		SET status = ?, attempts = ?, error = ?, processing_started_at = NULL, updated_at = ?
 		WHERE id = ?
-	`, EventStatusFailed, attempts, processingError.Error(), now, eventID)
+	`), EventStatusFailed, attempts, processingError.Error(), now, eventID)
 	if err != nil {
 		return fmt.Errorf("mark event failed: %w", err)
 	}
@@ -362,12 +366,12 @@ func (store *EventStore) MarkFailed(ctx context.Context, eventID string, attempt
 }
 
 func (store *EventStore) List(ctx context.Context, limit int) ([]StoredEvent, error) {
-	rows, err := store.db.QueryContext(ctx, `
+	rows, err := store.db.QueryContext(ctx, store.bind(`
 		SELECT id, type, payload, status, error, attempts, created_at, updated_at
 		FROM events
 		ORDER BY created_at DESC
 		LIMIT ?
-	`, limit)
+	`), limit)
 	if err != nil {
 		return nil, fmt.Errorf("list events: %w", err)
 	}
@@ -406,9 +410,9 @@ func (store *EventStore) migrate(ctx context.Context) error {
 			status TEXT NOT NULL,
 			error TEXT NOT NULL DEFAULT '',
 			attempts INTEGER NOT NULL DEFAULT 0,
-			created_at TIMESTAMP NOT NULL,
-			updated_at TIMESTAMP NOT NULL,
-			processing_started_at TIMESTAMP
+			created_at TIMESTAMPTZ NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL,
+			processing_started_at TIMESTAMPTZ
 		);
 
 		CREATE TABLE IF NOT EXISTS dead_letters (
@@ -417,100 +421,33 @@ func (store *EventStore) migrate(ctx context.Context) error {
 			payload TEXT NOT NULL,
 			error TEXT NOT NULL,
 			attempts INTEGER NOT NULL,
-			failed_at TIMESTAMP NOT NULL,
-			replayed_at TIMESTAMP
+			failed_at TIMESTAMPTZ NOT NULL,
+			replayed_at TIMESTAMPTZ
 		);
+
 		CREATE TABLE IF NOT EXISTS outbox (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			event_id TEXT NOT NULL UNIQUE,
+			id BIGSERIAL PRIMARY KEY,
+			event_id TEXT NOT NULL UNIQUE REFERENCES events(id),
 			event_type TEXT NOT NULL,
 			payload TEXT NOT NULL,
 			attempts INTEGER NOT NULL DEFAULT 0,
 			last_error TEXT NOT NULL DEFAULT '',
-			created_at TIMESTAMP NOT NULL,
-			published_at TIMESTAMP,
-			FOREIGN KEY (event_id) REFERENCES events(id)
+			created_at TIMESTAMPTZ NOT NULL,
+			published_at TIMESTAMPTZ
 		);
 
 		INSERT INTO outbox (event_id, event_type, payload, attempts, created_at)
 		SELECT id, type, payload, 0, created_at
 		FROM events
 		WHERE status = 'queued'
-		ON CONFLICT(event_id) DO NOTHING;
+		ON CONFLICT (event_id) DO NOTHING;
 
 		CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
 		CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
 		CREATE INDEX IF NOT EXISTS idx_outbox_pending ON outbox(published_at, id);
 	`)
 	if err != nil {
-		return fmt.Errorf("migrate event store: %w", err)
-	}
-	if err := store.ensureProcessingStartedAtColumn(ctx); err != nil {
-		return err
-	}
-	if err := store.ensureDeadLetterReplayedAtColumn(ctx); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (store *EventStore) ensureDeadLetterReplayedAtColumn(ctx context.Context) error {
-	rows, err := store.db.QueryContext(ctx, `PRAGMA table_info(dead_letters)`)
-	if err != nil {
-		return fmt.Errorf("inspect dead letters schema: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid int
-		var name, columnType string
-		var notNull, primaryKey int
-		var defaultValue any
-		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
-			return fmt.Errorf("scan dead letters schema: %w", err)
-		}
-		if name == "replayed_at" {
-			return nil
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate dead letters schema: %w", err)
-	}
-	if err := rows.Close(); err != nil {
-		return fmt.Errorf("close dead letters schema cursor: %w", err)
-	}
-	if _, err := store.db.ExecContext(ctx, `ALTER TABLE dead_letters ADD COLUMN replayed_at TIMESTAMP`); err != nil {
-		return fmt.Errorf("add dead letter replay column: %w", err)
-	}
-	return nil
-}
-
-func (store *EventStore) ensureProcessingStartedAtColumn(ctx context.Context) error {
-	rows, err := store.db.QueryContext(ctx, `PRAGMA table_info(events)`)
-	if err != nil {
-		return fmt.Errorf("inspect events schema: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var cid int
-		var name, columnType string
-		var notNull, primaryKey int
-		var defaultValue any
-		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
-			return fmt.Errorf("scan events schema: %w", err)
-		}
-		if name == "processing_started_at" {
-			return nil
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate events schema: %w", err)
-	}
-	if err := rows.Close(); err != nil {
-		return fmt.Errorf("close events schema cursor: %w", err)
-	}
-	if _, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN processing_started_at TIMESTAMP`); err != nil {
-		return fmt.Errorf("add processing lease column: %w", err)
+		return fmt.Errorf("migrate postgres event store: %w", err)
 	}
 	return nil
 }

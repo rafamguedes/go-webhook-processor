@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"path/filepath"
+	"os"
 	"sync"
 	"testing"
 )
@@ -44,19 +44,29 @@ func (queue *testEventQueue) Close() error {
 
 func newTestEventStore(t *testing.T) *EventStore {
 	t.Helper()
-	store, _ := newTestEventStoreWithPath(t)
+	store, _ := newTestEventStoreWithURL(t)
 	return store
 }
 
-func newTestEventStoreWithPath(t *testing.T) (*EventStore, string) {
+func newTestEventStoreWithURL(t *testing.T) (*EventStore, string) {
 	t.Helper()
-	databasePath := filepath.Join(t.TempDir(), "events.db")
-	store, err := OpenEventStore(databasePath)
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_DATABASE_URL is required for PostgreSQL integration tests")
+	}
+	store, err := OpenEventStore(databaseURL)
 	if err != nil {
 		t.Fatalf("failed to open test event store: %v", err)
 	}
-	t.Cleanup(func() { store.Close() })
-	return store, databasePath
+	if _, err := store.db.ExecContext(t.Context(), `TRUNCATE TABLE dead_letters, outbox, events RESTART IDENTITY CASCADE`); err != nil {
+		store.Close()
+		t.Fatalf("failed to reset test event store: %v", err)
+	}
+	t.Cleanup(func() {
+		store.db.ExecContext(context.Background(), `TRUNCATE TABLE dead_letters, outbox, events RESTART IDENTITY CASCADE`)
+		store.Close()
+	})
+	return store, databaseURL
 }
 
 func newTestApp(t *testing.T) App {
@@ -76,7 +86,7 @@ func testConfig() Config {
 		MaxRetries:               3,
 		RetryBackoffSeconds:      1,
 		DeadLetterCapacity:       100,
-		DatabasePath:             "./events-test.db",
+		DatabaseURL:              "postgres://webhook:webhook_dev@localhost:5432/webhook_test?sslmode=disable",
 		RabbitMQURL:              "amqp://guest:guest@localhost:5672/",
 		RabbitMQQueue:            "webhook.events.test",
 		RabbitMQReconnectMs:      50,

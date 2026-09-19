@@ -84,7 +84,7 @@ func TestEventStoreReclaimsExpiredProcessingLease(t *testing.T) {
 	}
 
 	oldLease := time.Now().UTC().Add(-2 * time.Minute)
-	if _, err := store.db.ExecContext(t.Context(), `UPDATE events SET processing_started_at = ? WHERE id = ?`, oldLease, event.ID); err != nil {
+	if _, err := store.db.ExecContext(t.Context(), `UPDATE events SET processing_started_at = $1 WHERE id = $2`, oldLease, event.ID); err != nil {
 		t.Fatalf("failed to expire processing lease: %v", err)
 	}
 
@@ -117,7 +117,7 @@ func TestEventStoreTreatsProcessedEventAsFinal(t *testing.T) {
 }
 
 func TestEventStorePersistsDeadLetter(t *testing.T) {
-	store, databasePath := newTestEventStoreWithPath(t)
+	store, databaseURL := newTestEventStoreWithURL(t)
 	event := testEvent()
 	if err := store.SaveDeadLetter(t.Context(), event, errForTest(), 3); err != nil {
 		t.Fatalf("failed to save dead letter: %v", err)
@@ -126,7 +126,7 @@ func TestEventStorePersistsDeadLetter(t *testing.T) {
 		t.Fatalf("failed to close event store: %v", err)
 	}
 
-	reopened, err := OpenEventStore(databasePath)
+	reopened, err := OpenEventStore(databaseURL)
 	if err != nil {
 		t.Fatalf("failed to reopen event store: %v", err)
 	}

@@ -8,7 +8,7 @@ Este documento descreve o fluxo atual do Go Webhook Processor com Transactional 
 flowchart LR
     client[Cliente externo]
     handler[POST /events]
-    transaction[Transação SQLite]
+    transaction[Transação PostgreSQL]
     events[(events)]
     outbox[(outbox)]
     accepted[202 Accepted]
@@ -33,7 +33,7 @@ flowchart LR
 
 ## Garantia transacional
 
-O registro em `events` e a mensagem em `outbox` são inseridos na mesma transação SQLite. Ou ambos são confirmados, ou nenhum deles é persistido. Assim, uma falha entre o banco e o RabbitMQ não perde a intenção de publicação.
+O registro em `events` e a mensagem em `outbox` são inseridos na mesma transação PostgreSQL. Ou ambos são confirmados, ou nenhum deles é persistido. Assim, uma falha entre o banco e o RabbitMQ não perde a intenção de publicação.
 
 O dispatcher executa continuamente:
 
@@ -45,7 +45,7 @@ O dispatcher executa continuamente:
 
 ## Semântica de entrega
 
-A garantia é `at-least-once`. Se o processo cair depois de o broker confirmar a publicação e antes de o SQLite gravar `published_at`, a mensagem continuará pendente e poderá ser publicada novamente. Por isso, consumidores precisam tratar `event.id` de forma idempotente.
+A garantia é `at-least-once`. Se o processo cair depois de o broker confirmar a publicação e antes de o PostgreSQL gravar `published_at`, a mensagem continuará pendente e poderá ser publicada novamente. Por isso, consumidores precisam tratar `event.id` de forma idempotente.
 
 A implementação atual possui um dispatcher por instância. Para executar várias réplicas simultâneas, uma evolução deverá adicionar reivindicação de mensagens ou locking apropriado ao banco usado em produção.
 
@@ -54,7 +54,7 @@ A implementação atual possui um dispatcher por instância. Para executar vári
 ```mermaid
 flowchart TD
     start[Aplicação inicia]
-    migrate[Abre e migra o SQLite]
+    migrate[Abre e migra o PostgreSQL]
     queue[Conecta à EventQueue]
     workers[Inicia workers]
     dispatcher[Inicia OutboxDispatcher]
@@ -91,7 +91,7 @@ sequenceDiagram
 ## Componentes
 
 ```text
-Cliente -> HTTP -> SQLite (events + outbox) -> dispatcher -> RabbitMQ -> workers -> events/dead_letters
+Cliente -> HTTP -> PostgreSQL (events + outbox) -> dispatcher -> RabbitMQ -> workers -> events/dead_letters
 ```
 
 - `handlers.go`: valida e persiste a transação.
@@ -107,7 +107,7 @@ O publisher cria uma conexão sob demanda e a invalida quando uma publicação o
 
 ## Idempotência do consumidor
 
-Cada entrega passa por um compare-and-set no SQLite antes do efeito de negócio:
+Cada entrega passa por um compare-and-set no PostgreSQL antes do efeito de negócio:
 
 ```sql
 UPDATE events
@@ -123,4 +123,4 @@ Uma linha alterada significa que o worker adquiriu o lease. Nenhuma linha altera
 
 ## Dead Letter persistente
 
-Quando todas as tentativas de processamento falham, o worker grava o evento na tabela `dead_letters` com erro, quantidade de tentativas e `failed_at`. O endpoint `GET /dead-letters` consulta o SQLite, portanto o histórico permanece disponível após reinícios. O reprocessamento ainda será uma operação separada, para evitar republicar eventos sem uma política explícita.
+Quando todas as tentativas de processamento falham, o worker grava o evento na tabela `dead_letters` com erro, quantidade de tentativas e `failed_at`. O endpoint `GET /dead-letters` consulta o PostgreSQL, portanto o histórico permanece disponível após reinícios. O reprocessamento ainda será uma operação separada, para evitar republicar eventos sem uma política explícita.

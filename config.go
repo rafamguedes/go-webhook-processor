@@ -19,7 +19,7 @@ type Config struct {
 	MaxRetries               int
 	RetryBackoffSeconds      int
 	DeadLetterCapacity       int
-	DatabasePath             string
+	DatabaseURL              string
 	DLQReplayToken           string
 	RabbitMQURL              string
 	RabbitMQQueue            string
@@ -42,7 +42,7 @@ func LoadConfig() (Config, error) {
 		MaxRetries:               getEnvAsInt("MAX_RETRIES", 3),
 		RetryBackoffSeconds:      getEnvAsInt("RETRY_BACKOFF_SECONDS", 1),
 		DeadLetterCapacity:       getEnvAsInt("DEAD_LETTER_CAPACITY", 100),
-		DatabasePath:             getEnv("DATABASE_PATH", "./events.db"),
+		DatabaseURL:              getEnv("DATABASE_URL", "postgres://webhook:webhook_dev@localhost:5432/webhook?sslmode=disable"),
 		DLQReplayToken:           getEnv("DLQ_REPLAY_TOKEN", ""),
 		RabbitMQURL:              getEnv("RABBITMQ_URL", "amqp://webhook:webhook_dev@localhost:5672/"),
 		RabbitMQQueue:            getEnv("RABBITMQ_QUEUE", "webhook.events"),
@@ -78,8 +78,10 @@ func LoadConfig() (Config, error) {
 	if config.DeadLetterCapacity <= 0 {
 		return Config{}, fmt.Errorf("DEAD_LETTER_CAPACITY must be greater than zero")
 	}
-	if config.DatabasePath == "" {
-		return Config{}, fmt.Errorf("DATABASE_PATH is required")
+	databaseURL, err := url.Parse(config.DatabaseURL)
+	if err != nil || databaseURL.Host == "" ||
+		(databaseURL.Scheme != "postgres" && databaseURL.Scheme != "postgresql") {
+		return Config{}, fmt.Errorf("DATABASE_URL must be a valid postgres or postgresql URL")
 	}
 	if config.RabbitMQReconnectMs <= 0 {
 		return Config{}, fmt.Errorf("RABBITMQ_RECONNECT_MS must be greater than zero")
