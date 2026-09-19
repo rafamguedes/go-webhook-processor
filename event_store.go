@@ -14,9 +14,10 @@ import (
 var ErrEventAlreadyExists = errors.New("event already exists")
 
 const (
-	EventStatusQueued    = "queued"
-	EventStatusProcessed = "processed"
-	EventStatusFailed    = "failed"
+	EventStatusQueued     = "queued"
+	EventStatusProcessing = "processing"
+	EventStatusProcessed  = "processed"
+	EventStatusFailed     = "failed"
 )
 
 type StoredEvent struct {
@@ -29,6 +30,15 @@ type StoredEvent struct {
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
+
+type EventClaimResult int
+
+const (
+	EventClaimed EventClaimResult = iota
+	EventClaimInProgress
+	EventClaimFinal
+	EventClaimMissing
+)
 
 type EventStore struct {
 	db *sql.DB
@@ -155,11 +165,52 @@ func (store *EventStore) MarkOutboxFailed(ctx context.Context, messageID int64, 
 	}
 	return nil
 }
+func (store *EventStore) ClaimForProcessing(ctx context.Context, eventID string, leaseDuration time.Duration) (EventClaimResult, error) {
+	now := time.Now().UTC()
+	leaseExpiredBefore := now.Add(-leaseDuration)
+	result, err := store.db.ExecContext(ctx, `
+		UPDATE events
+		SET status = ?, processing_started_at = ?, updated_at = ?
+		WHERE id = ?
+		  AND (
+			status = ?
+			OR (status = ? AND processing_started_at <= ?)
+		  )
+	`, EventStatusProcessing, now, now, eventID, EventStatusQueued, EventStatusProcessing, leaseExpiredBefore)
+	if err != nil {
+		return EventClaimMissing, fmt.Errorf("claim event for processing: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return EventClaimMissing, fmt.Errorf("check claimed event: %w", err)
+	}
+	if rowsAffected == 1 {
+		return EventClaimed, nil
+	}
+
+	var status string
+	if err := store.db.QueryRowContext(ctx, `SELECT status FROM events WHERE id = ?`, eventID).Scan(&status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return EventClaimMissing, nil
+		}
+		return EventClaimMissing, fmt.Errorf("read event claim status: %w", err)
+	}
+
+	switch status {
+	case EventStatusProcessed, EventStatusFailed:
+		return EventClaimFinal, nil
+	case EventStatusProcessing:
+		return EventClaimInProgress, nil
+	default:
+		return EventClaimInProgress, nil
+	}
+}
 func (store *EventStore) MarkProcessed(ctx context.Context, eventID string, attempts int) error {
 	now := time.Now().UTC()
 	_, err := store.db.ExecContext(ctx, `
 		UPDATE events
-		SET status = ?, attempts = ?, error = '', updated_at = ?
+		SET status = ?, attempts = ?, error = '', processing_started_at = NULL, updated_at = ?
 		WHERE id = ?
 	`, EventStatusProcessed, attempts, now, eventID)
 	if err != nil {
@@ -173,7 +224,7 @@ func (store *EventStore) MarkFailed(ctx context.Context, eventID string, attempt
 	now := time.Now().UTC()
 	_, err := store.db.ExecContext(ctx, `
 		UPDATE events
-		SET status = ?, attempts = ?, error = ?, updated_at = ?
+		SET status = ?, attempts = ?, error = ?, processing_started_at = NULL, updated_at = ?
 		WHERE id = ?
 	`, EventStatusFailed, attempts, processingError.Error(), now, eventID)
 	if err != nil {
@@ -229,7 +280,8 @@ func (store *EventStore) migrate(ctx context.Context) error {
 			error TEXT NOT NULL DEFAULT '',
 			attempts INTEGER NOT NULL DEFAULT 0,
 			created_at TIMESTAMP NOT NULL,
-			updated_at TIMESTAMP NOT NULL
+			updated_at TIMESTAMP NOT NULL,
+			processing_started_at TIMESTAMP
 		);
 
 		CREATE TABLE IF NOT EXISTS outbox (
@@ -257,6 +309,39 @@ func (store *EventStore) migrate(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("migrate event store: %w", err)
 	}
+	if err := store.ensureProcessingStartedAtColumn(ctx); err != nil {
+		return err
+	}
+	return nil
+}
 
+func (store *EventStore) ensureProcessingStartedAtColumn(ctx context.Context) error {
+	rows, err := store.db.QueryContext(ctx, `PRAGMA table_info(events)`)
+	if err != nil {
+		return fmt.Errorf("inspect events schema: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, primaryKey int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return fmt.Errorf("scan events schema: %w", err)
+		}
+		if name == "processing_started_at" {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate events schema: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close events schema cursor: %w", err)
+	}
+	if _, err := store.db.ExecContext(ctx, `ALTER TABLE events ADD COLUMN processing_started_at TIMESTAMP`); err != nil {
+		return fmt.Errorf("add processing lease column: %w", err)
+	}
 	return nil
 }

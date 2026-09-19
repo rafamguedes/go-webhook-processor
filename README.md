@@ -46,6 +46,7 @@ Retorna um snapshot dos principais contadores operacionais da aplicação.
   "eventsQueued": 10,
   "eventsRejected": 2,
   "eventsDuplicated": 1,
+  "eventsSkippedDuplicate": 2,
   "eventsProcessed": 8,
   "eventsFailedPermanent": 1,
   "eventRetries": 3,
@@ -147,10 +148,10 @@ RABBITMQ_CONNECT_TIMEOUT_MS   timeout para cada tentativa de conexão AMQP
 
 A aplicação usa SQLite para persistir o histórico operacional dos eventos recebidos.
 
-Cada evento aceito é salvo inicialmente com status:
+Cada evento aceito é salvo inicialmente como `queued`. Quando um worker adquire a reserva, o status passa para:
 
 ```text
-queued
+processing
 ```
 
 Depois, o worker atualiza o status para:
@@ -178,6 +179,16 @@ Se o mesmo `event.id` for recebido novamente, a aplicação rejeita o evento com
 Isso evita processamento duplicado em cenários comuns de webhook, nos quais o sistema externo pode reenviar o mesmo evento por timeout, falha de rede ou política própria de retry.
 
 A deduplicação é persistente: a chave primária `events.id` no SQLite impede que o mesmo evento seja aceito novamente, inclusive após a reinicialização da aplicação.
+### Idempotência no consumidor
+
+Antes de executar um evento recebido do RabbitMQ, o worker tenta alterar atomicamente seu estado de `queued` para `processing`. Apenas o worker que modificar a linha ganha o direito de executar o processamento.
+
+- `processed` ou `failed`: a redelivery é ignorada e recebe ACK.
+- `processing` com lease válido: a entrega recebe NACK com requeue após uma pequena espera.
+- `processing` com lease expirado: outro worker pode reservar e recuperar o processamento.
+- evento inexistente no SQLite: a entrega é rejeitada sem requeue.
+
+Essa coordenação protege contra workers concorrentes e redeliveries comuns. A garantia continua sendo `at-least-once`: efeitos realizados em sistemas externos também devem usar `event.id` como chave idempotente.
 
 Cada evento novo também gera uma linha na tabela `outbox`, dentro da mesma transação. O dispatcher consulta registros cujo `published_at` está vazio, publica-os e só então registra a data de publicação. Mensagens pendentes sobrevivem à reinicialização da aplicação.
 

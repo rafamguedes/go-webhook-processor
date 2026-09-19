@@ -21,7 +21,7 @@ func TestProcessEventWithRetrySucceedsAfterFailure(t *testing.T) {
 	attempts := 0
 	sleeps := 0
 
-	succeeded := processEventWithRetry(1, event, config, func(workerID int, event Event) error {
+	succeeded, terminalPersisted := processEventWithRetry(1, event, config, func(workerID int, event Event) error {
 		attempts++
 		if attempts == 1 {
 			return fmt.Errorf("temporary failure")
@@ -36,6 +36,9 @@ func TestProcessEventWithRetrySucceedsAfterFailure(t *testing.T) {
 
 	if !succeeded {
 		t.Fatal("expected event processing to succeed")
+	}
+	if !terminalPersisted {
+		t.Fatal("expected processed status to be persisted")
 	}
 
 	if attempts != 2 {
@@ -76,7 +79,7 @@ func TestProcessEventWithRetryFailsPermanently(t *testing.T) {
 	attempts := 0
 	sleeps := 0
 
-	succeeded := processEventWithRetry(1, event, config, func(workerID int, event Event) error {
+	succeeded, terminalPersisted := processEventWithRetry(1, event, config, func(workerID int, event Event) error {
 		attempts++
 		return errForTest()
 	}, func(duration time.Duration) {
@@ -85,6 +88,9 @@ func TestProcessEventWithRetryFailsPermanently(t *testing.T) {
 
 	if succeeded {
 		t.Fatal("expected event processing to fail")
+	}
+	if !terminalPersisted {
+		t.Fatal("expected failed status to be persisted")
 	}
 
 	if attempts != 3 {
@@ -140,4 +146,74 @@ func testEvent() Event {
 
 func errForTest() error {
 	return fmt.Errorf("persistent failure")
+}
+
+func TestHandleDeliverySkipsAlreadyProcessedEvent(t *testing.T) {
+	store := newTestEventStore(t)
+	event := testEvent()
+	if err := store.SaveQueuedWithOutbox(t.Context(), event); err != nil {
+		t.Fatalf("failed to save event: %v", err)
+	}
+	if err := store.MarkProcessed(t.Context(), event.ID, 1); err != nil {
+		t.Fatalf("failed to mark event processed: %v", err)
+	}
+
+	acked := false
+	processed := false
+	delivery := EventDelivery{
+		Event: event,
+		ack: func() error {
+			acked = true
+			return nil
+		},
+	}
+	metrics := NewMetrics()
+	handleDelivery(1, delivery, testConfig(), metrics, NewDeadLetterStore(10), store, func(int, Event) error {
+		processed = true
+		return nil
+	}, func(time.Duration) {})
+
+	if processed {
+		t.Fatal("expected processed event not to execute again")
+	}
+	if !acked {
+		t.Fatal("expected duplicate delivery to be acknowledged")
+	}
+	if metrics.Snapshot(0, 0).EventsSkippedDuplicate != 1 {
+		t.Fatal("expected skipped duplicate metric to be incremented")
+	}
+}
+
+func TestHandleDeliveryRequeuesEventWithActiveLease(t *testing.T) {
+	store := newTestEventStore(t)
+	event := testEvent()
+	if err := store.SaveQueuedWithOutbox(t.Context(), event); err != nil {
+		t.Fatalf("failed to save event: %v", err)
+	}
+	if _, err := store.ClaimForProcessing(t.Context(), event.ID, time.Minute); err != nil {
+		t.Fatalf("failed to claim event: %v", err)
+	}
+
+	nacked := false
+	requeued := false
+	delivery := EventDelivery{
+		Event: event,
+		nack: func(requeue bool) error {
+			nacked = true
+			requeued = requeue
+			return nil
+		},
+	}
+	processed := false
+	handleDelivery(1, delivery, testConfig(), NewMetrics(), NewDeadLetterStore(10), store, func(int, Event) error {
+		processed = true
+		return nil
+	}, func(time.Duration) {})
+
+	if processed {
+		t.Fatal("expected event with active lease not to execute concurrently")
+	}
+	if !nacked || !requeued {
+		t.Fatal("expected delivery with active lease to be nacked with requeue")
+	}
 }

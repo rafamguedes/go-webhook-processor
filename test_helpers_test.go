@@ -83,5 +83,7 @@ func testConfig() Config {
 		RabbitMQConnectTimeoutMs: 500,
 		OutboxPollIntervalMs:     10,
 		OutboxBatchSize:          100,
+		ProcessingLeaseSeconds:   300,
+		ProcessingRequeueDelayMs: 10,
 	}
 }

@@ -16,6 +16,8 @@ func TestLoadConfigUsesDefaults(t *testing.T) {
 	t.Setenv("RABBITMQ_QUEUE", "")
 	t.Setenv("OUTBOX_POLL_INTERVAL_MS", "")
 	t.Setenv("OUTBOX_BATCH_SIZE", "")
+	t.Setenv("PROCESSING_LEASE_SECONDS", "")
+	t.Setenv("PROCESSING_REQUEUE_DELAY_MS", "")
 
 	config, err := LoadConfig()
 	if err != nil {
@@ -56,6 +58,9 @@ func TestLoadConfigUsesDefaults(t *testing.T) {
 	if config.OutboxPollIntervalMs != 500 || config.OutboxBatchSize != 100 {
 		t.Fatalf("expected default outbox settings 500ms/100, got %dms/%d", config.OutboxPollIntervalMs, config.OutboxBatchSize)
 	}
+	if config.ProcessingLeaseSeconds != 300 || config.ProcessingRequeueDelayMs != 1000 {
+		t.Fatalf("expected default processing settings 300s/1000ms, got %ds/%dms", config.ProcessingLeaseSeconds, config.ProcessingRequeueDelayMs)
+	}
 }
 
 func TestLoadConfigReadsEnvironmentVariables(t *testing.T) {
@@ -72,6 +77,8 @@ func TestLoadConfigReadsEnvironmentVariables(t *testing.T) {
 	t.Setenv("RABBITMQ_QUEUE", "events.production")
 	t.Setenv("OUTBOX_POLL_INTERVAL_MS", "250")
 	t.Setenv("OUTBOX_BATCH_SIZE", "20")
+	t.Setenv("PROCESSING_LEASE_SECONDS", "120")
+	t.Setenv("PROCESSING_REQUEUE_DELAY_MS", "250")
 
 	config, err := LoadConfig()
 	if err != nil {
@@ -115,6 +122,9 @@ func TestLoadConfigReadsEnvironmentVariables(t *testing.T) {
 	}
 	if config.OutboxPollIntervalMs != 250 || config.OutboxBatchSize != 20 {
 		t.Fatalf("expected outbox settings 250ms/20, got %dms/%d", config.OutboxPollIntervalMs, config.OutboxBatchSize)
+	}
+	if config.ProcessingLeaseSeconds != 120 || config.ProcessingRequeueDelayMs != 250 {
+		t.Fatalf("expected processing settings 120s/250ms, got %ds/%dms", config.ProcessingLeaseSeconds, config.ProcessingRequeueDelayMs)
 	}
 }
 

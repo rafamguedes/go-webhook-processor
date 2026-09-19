@@ -26,6 +26,7 @@ flowchart LR
     dispatcher -->|Publish + confirmação| queue
     dispatcher -->|marca published_at| outbox
     queue --> workers
+    workers -->|reserva atômica: processing| events
     workers --> processor
     processor -->|processed ou failed| events
 ```
@@ -103,3 +104,19 @@ Cliente -> HTTP -> SQLite (events + outbox) -> dispatcher -> EventQueue -> worke
 
 O publisher cria uma conexão sob demanda e a invalida quando uma publicação ou confirmação falha. A tentativa seguinte cria uma nova sessão. O consumer mantém um loop próprio: quando a conexão fecha inesperadamente, aguarda `RABBITMQ_RECONNECT_MS` e conecta novamente. A inicialização da aplicação não exige que o broker já esteja disponível; o Outbox mantém as mensagens pendentes durante a indisponibilidade.
 - `worker.go`: processa eventos, aplica retry e atualiza o status.
+
+## Idempotência do consumidor
+
+Cada entrega passa por um compare-and-set no SQLite antes do efeito de negócio:
+
+```sql
+UPDATE events
+SET status = 'processing', processing_started_at = ?
+WHERE id = ?
+  AND (
+    status = 'queued'
+    OR (status = 'processing' AND processing_started_at <= ?)
+  );
+```
+
+Uma linha alterada significa que o worker adquiriu o lease. Nenhuma linha alterada faz o worker consultar o estado atual: estados finais são confirmados sem reprocessamento; um lease ativo provoca NACK com requeue; um lease expirado pode ser recuperado. `PROCESSING_LEASE_SECONDS` deve ser maior que o tempo máximo esperado do processamento normal.

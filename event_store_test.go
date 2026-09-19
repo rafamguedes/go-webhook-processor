@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestEventStorePersistsStatusChanges(t *testing.T) {
@@ -45,5 +46,72 @@ func TestEventStoreRejectsDuplicateID(t *testing.T) {
 
 	if err := store.SaveQueuedWithOutbox(t.Context(), event); !errors.Is(err, ErrEventAlreadyExists) {
 		t.Fatalf("expected duplicate event error, got %v", err)
+	}
+}
+
+func TestEventStoreClaimsEventOnlyOnce(t *testing.T) {
+	store := newTestEventStore(t)
+	event := testEvent()
+	if err := store.SaveQueuedWithOutbox(t.Context(), event); err != nil {
+		t.Fatalf("failed to save event: %v", err)
+	}
+
+	firstClaim, err := store.ClaimForProcessing(t.Context(), event.ID, time.Minute)
+	if err != nil {
+		t.Fatalf("failed to claim event: %v", err)
+	}
+	secondClaim, err := store.ClaimForProcessing(t.Context(), event.ID, time.Minute)
+	if err != nil {
+		t.Fatalf("failed to inspect second claim: %v", err)
+	}
+
+	if firstClaim != EventClaimed {
+		t.Fatalf("expected first claim to succeed, got %v", firstClaim)
+	}
+	if secondClaim != EventClaimInProgress {
+		t.Fatalf("expected second claim to see processing event, got %v", secondClaim)
+	}
+}
+
+func TestEventStoreReclaimsExpiredProcessingLease(t *testing.T) {
+	store := newTestEventStore(t)
+	event := testEvent()
+	if err := store.SaveQueuedWithOutbox(t.Context(), event); err != nil {
+		t.Fatalf("failed to save event: %v", err)
+	}
+	if _, err := store.ClaimForProcessing(t.Context(), event.ID, time.Minute); err != nil {
+		t.Fatalf("failed to claim event: %v", err)
+	}
+
+	oldLease := time.Now().UTC().Add(-2 * time.Minute)
+	if _, err := store.db.ExecContext(t.Context(), `UPDATE events SET processing_started_at = ? WHERE id = ?`, oldLease, event.ID); err != nil {
+		t.Fatalf("failed to expire processing lease: %v", err)
+	}
+
+	claim, err := store.ClaimForProcessing(t.Context(), event.ID, time.Minute)
+	if err != nil {
+		t.Fatalf("failed to reclaim event: %v", err)
+	}
+	if claim != EventClaimed {
+		t.Fatalf("expected expired lease to be reclaimed, got %v", claim)
+	}
+}
+
+func TestEventStoreTreatsProcessedEventAsFinal(t *testing.T) {
+	store := newTestEventStore(t)
+	event := testEvent()
+	if err := store.SaveQueuedWithOutbox(t.Context(), event); err != nil {
+		t.Fatalf("failed to save event: %v", err)
+	}
+	if err := store.MarkProcessed(t.Context(), event.ID, 1); err != nil {
+		t.Fatalf("failed to mark event processed: %v", err)
+	}
+
+	claim, err := store.ClaimForProcessing(t.Context(), event.ID, time.Minute)
+	if err != nil {
+		t.Fatalf("failed to inspect processed event: %v", err)
+	}
+	if claim != EventClaimFinal {
+		t.Fatalf("expected processed event to be final, got %v", claim)
 	}
 }
