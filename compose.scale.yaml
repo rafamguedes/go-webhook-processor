@@ -1,0 +1,13 @@
+services:
+  webhook-processor:
+    ports: !reset []
+
+  api-gateway:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./deploy/nginx-resilience.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      webhook-processor:
+        condition: service_started

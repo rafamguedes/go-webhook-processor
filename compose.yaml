@@ -54,7 +54,6 @@ services:
       context: .
       dockerfile: Dockerfile
     image: go-webhook-processor:local
-    container_name: go-webhook-processor
     environment:
       PORT: ${PORT:-8080}
       QUEUE_SIZE: ${QUEUE_SIZE:-100}
