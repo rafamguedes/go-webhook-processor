@@ -15,6 +15,7 @@ WORKDIR /app
 RUN chown -R app:app /app
 
 COPY --from=build /app/go-webhook-processor /app/go-webhook-processor
+COPY --from=build /src/migrations /app/migrations
 
 USER app
 EXPOSE 8080

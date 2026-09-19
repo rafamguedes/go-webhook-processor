@@ -17,6 +17,19 @@ services:
       retries: 5
     restart: unless-stopped
 
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: go-webhook-processor:local
+    command: ["migrate"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-webhook}:${POSTGRES_PASSWORD:-webhook_dev}@postgres:5432/${POSTGRES_DB:-webhook}?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   rabbitmq:
     image: rabbitmq:4.3.6-management-alpine
     container_name: go-webhook-rabbitmq
@@ -65,6 +78,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
     ports:

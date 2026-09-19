@@ -42,6 +42,9 @@ func (queue *testEventQueue) Close() error {
 	return queue.StopConsuming()
 }
 
+var testMigrationsOnce sync.Once
+var testMigrationsErr error
+
 func newTestEventStore(t *testing.T) *EventStore {
 	t.Helper()
 	store, _ := newTestEventStoreWithURL(t)
@@ -54,6 +57,14 @@ func newTestEventStoreWithURL(t *testing.T) (*EventStore, string) {
 	if databaseURL == "" {
 		t.Skip("TEST_DATABASE_URL is required for PostgreSQL integration tests")
 	}
+
+	testMigrationsOnce.Do(func() {
+		testMigrationsErr = RunMigrations(t.Context(), databaseURL, "migrations")
+	})
+	if testMigrationsErr != nil {
+		t.Fatalf("failed to migrate test event store: %v", testMigrationsErr)
+	}
+
 	store, err := OpenEventStore(databaseURL)
 	if err != nil {
 		t.Fatalf("failed to open test event store: %v", err)

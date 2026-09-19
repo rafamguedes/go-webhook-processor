@@ -53,20 +53,20 @@ A implementação atual possui um dispatcher por instância. Para executar vári
 
 ```mermaid
 flowchart TD
+    migration[Migração versionada]
     start[Aplicação inicia]
-    migrate[Abre e migra o PostgreSQL]
     queue[Conecta à EventQueue]
     workers[Inicia workers]
     dispatcher[Inicia OutboxDispatcher]
     pending[Busca mensagens pendentes]
     server[Disponibiliza HTTP]
 
-    start --> migrate --> queue --> workers --> dispatcher
+    migration --> start --> queue --> workers --> dispatcher
     dispatcher --> pending
     dispatcher --> server
 ```
 
-A migração cria a tabela `outbox` e também gera mensagens para eventos antigos que ainda estejam com status `queued`.
+As migrações são arquivos SQL versionados em `migrations/`, aplicados pelo comando `migrate` antes da aplicação iniciar. A tabela `schema_migrations` registra a versão do esquema para que cada alteração seja executada uma única vez.
 
 ## Encerramento gracioso
 

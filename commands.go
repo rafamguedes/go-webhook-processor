@@ -29,6 +29,6 @@ func runCommand(ctx context.Context, args []string, store *EventStore) (bool, er
 			"eventId":  eventID,
 		})
 	default:
-		return true, fmt.Errorf("comando desconhecido %q; uso: go run . replay-dead-letter <event-id>", args[0])
+		return true, fmt.Errorf("comando desconhecido %q; uso: go run . migrate ou go run . replay-dead-letter <event-id>", args[0])
 	}
 }

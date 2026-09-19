@@ -20,6 +20,19 @@ func main() {
 	}
 	setupLogger(config)
 
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		if len(os.Args) != 2 {
+			fmt.Fprintln(os.Stderr, "uso: go run . migrate")
+			os.Exit(1)
+		}
+		if err := RunMigrations(context.Background(), config.DatabaseURL, "migrations"); err != nil {
+			slog.Error("database migration failed", "error", err)
+			os.Exit(1)
+		}
+		slog.Info("database migrations complete")
+		return
+	}
+
 	eventStore, err := OpenEventStore(config.DatabaseURL)
 	if err != nil {
 		slog.Error("open event store failed", "error", err)

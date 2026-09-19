@@ -96,6 +96,8 @@ queue.go            contratos de publicação, consumo e entrega de eventos
 models.go           contratos de entrada e saída usados pela API
 metrics.go          contadores thread-safe e snapshot de métricas
 event_store.go      persistência PostgreSQL, estados, idempotência e tabela Outbox
+migrations/         histórico versionado do esquema PostgreSQL
+migrations.go       execução controlada das migrações
 rabbitmq_queue.go   implementação durável da EventQueue com RabbitMQ
 deadletter.go       contrato e implementações da dead-letter persistente e de teste
 handlers.go         handlers HTTP, validação, persistência e respostas JSON
@@ -157,6 +159,16 @@ PROCESSING_REQUEUE_DELAY_MS    espera antes de reenfileirar uma entrega em proce
 
 A aplicação usa PostgreSQL para persistir o histórico operacional dos eventos recebidos.
 O PostgreSQL oferece concorrência de leitura e escrita adequada para a aplicação, mantendo a consistência transacional da Outbox, dos eventos e da DLQ.
+
+O esquema é controlado por migrações SQL versionadas em `migrations/`. A aplicação não altera o banco ao iniciar: execute o comando abaixo antes de iniciar uma nova versão do serviço.
+
+```powershell
+go run . migrate
+```
+
+O comando registra a versão aplicada na tabela `schema_migrations`. Novas alterações devem adicionar um novo par de arquivos `NNNNNN_descricao.up.sql` e `NNNNNN_descricao.down.sql`, sem modificar migrações já aplicadas.
+
+No Docker Compose, o serviço `migrate` executa essa etapa automaticamente e a API só inicia quando ela termina com sucesso.
 
 Cada evento aceito é salvo inicialmente como `queued`. Quando um worker adquire a reserva, o status passa para:
 
@@ -263,7 +275,7 @@ http://localhost:8080
 
 ## Docker
 
-O Compose inicia a aplicação, o PostgreSQL persistido e o RabbitMQ com painel de gerenciamento. Copie `.env.example` para `.env` e altere as credenciais de desenvolvimento antes de compartilhar o ambiente.
+O Compose inicia PostgreSQL, RabbitMQ, o serviço pontual `migrate` e, após a migração concluir, a aplicação. Copie `.env.example` para `.env` e altere as credenciais de desenvolvimento antes de compartilhar o ambiente.
 
 ```powershell
 Copy-Item .env.example .env
