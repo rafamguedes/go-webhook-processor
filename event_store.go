@@ -301,14 +301,14 @@ func (store *EventStore) SaveDeadLetter(ctx context.Context, event Event, proces
 		return fmt.Errorf("marshal dead letter payload: %w", err)
 	}
 	_, err = store.db.ExecContext(ctx, store.bind(`
-		INSERT INTO dead_letters (event_id, event_type, payload, error, attempts, failed_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO dead_letters (event_id, event_type, request_id, payload, error, attempts, failed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(event_id) DO UPDATE SET
 			error = excluded.error,
 			attempts = excluded.attempts,
 			failed_at = excluded.failed_at,
 			replayed_at = NULL
-	`), event.ID, event.Type, string(payload), processingError.Error(), attempts, time.Now().UTC())
+	`), event.ID, event.Type, event.RequestID, string(payload), processingError.Error(), attempts, time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("save dead letter: %w", err)
 	}
@@ -322,13 +322,13 @@ func (store *EventStore) ReplayDeadLetter(ctx context.Context, eventID string) e
 	}
 	defer tx.Rollback()
 
-	var status, eventType, payload string
+	var status, eventType, requestID, payload string
 	if err := tx.QueryRowContext(ctx, store.bind(`
-		SELECT e.status, e.type, e.payload
+		SELECT e.status, e.type, e.request_id, e.payload
 		FROM events e
 		JOIN dead_letters d ON d.event_id = e.id
 		WHERE e.id = ?
-	`), eventID).Scan(&status, &eventType, &payload); err != nil {
+	`), eventID).Scan(&status, &eventType, &requestID, &payload); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrDeadLetterNotFound
 		}
@@ -361,9 +361,9 @@ func (store *EventStore) ReplayDeadLetter(ctx context.Context, eventID string) e
 	}
 	if rowsAffected == 0 {
 		if _, err := tx.ExecContext(ctx, store.bind(`
-			INSERT INTO outbox (event_id, event_type, payload, attempts, created_at)
-			VALUES (?, ?, ?, 0, ?)
-		`), eventID, eventType, payload, now); err != nil {
+			INSERT INTO outbox (event_id, event_type, request_id, payload, attempts, created_at)
+			VALUES (?, ?, ?, ?, 0, ?)
+		`), eventID, eventType, requestID, payload, now); err != nil {
 			return fmt.Errorf("create outbox message for replay: %w", err)
 		}
 	}
@@ -378,7 +378,7 @@ func (store *EventStore) ReplayDeadLetter(ctx context.Context, eventID string) e
 }
 func (store *EventStore) ListDeadLetters(ctx context.Context, limit int) ([]DeadLetter, error) {
 	rows, err := store.db.QueryContext(ctx, store.bind(`
-		SELECT event_id, event_type, payload, error, attempts, failed_at, replayed_at
+		SELECT event_id, event_type, request_id, payload, error, attempts, failed_at, replayed_at
 		FROM dead_letters
 		ORDER BY failed_at DESC
 		LIMIT ?
@@ -393,7 +393,7 @@ func (store *EventStore) ListDeadLetters(ctx context.Context, limit int) ([]Dead
 		var item DeadLetter
 		var payload string
 		var replayedAt sql.NullTime
-		if err := rows.Scan(&item.Event.ID, &item.Event.Type, &payload, &item.Error, &item.Attempts, &item.FailedAt, &replayedAt); err != nil {
+		if err := rows.Scan(&item.Event.ID, &item.Event.Type, &item.Event.RequestID, &payload, &item.Error, &item.Attempts, &item.FailedAt, &replayedAt); err != nil {
 			return nil, fmt.Errorf("scan dead letter: %w", err)
 		}
 		if replayedAt.Valid {

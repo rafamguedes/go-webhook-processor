@@ -1,0 +1,1 @@
+ALTER TABLE dead_letters ADD COLUMN request_id TEXT NOT NULL DEFAULT '';
