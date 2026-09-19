@@ -1,5 +1,6 @@
 param(
-    [int]$RecoveryWaitSeconds = 15
+    [int]$RecoveryWaitSeconds = 15,
+    [int]$RecoveryTimeoutSeconds = 60
 )
 
 $ErrorActionPreference = "Stop"
@@ -27,10 +28,24 @@ try {
     docker compose start rabbitmq | Out-Null
     Start-Sleep -Seconds $RecoveryWaitSeconds
 
-    $logs = docker compose logs --since="${RecoveryWaitSeconds}s" webhook-processor
-    if ($logs -notmatch [regex]::Escape($eventId) -or $logs -notmatch "outbox message published") {
-        throw "The recovered event was not found in application logs."
+    $deadline = (Get-Date).AddSeconds($RecoveryTimeoutSeconds)
+    do {
+        $logs = docker compose logs --since="5m" webhook-processor
+        $eventPublished = $logs -split "`r?`n" | Where-Object {
+            $_ -match [regex]::Escape($eventId) -and $_ -match "outbox message published"
+        }
+        if ($eventPublished) {
+            Write-Host "Recovered event found in application logs."
+            break
+        }
+
+        if ((Get-Date) -ge $deadline) {
+            throw "The recovered event was not found in application logs within ${RecoveryTimeoutSeconds}s."
+        }
+
+        Start-Sleep -Seconds 2
     }
+    while ($true)
 
     Write-Host "Resilience smoke test passed for event $eventId."
 }

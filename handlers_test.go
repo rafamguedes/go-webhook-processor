@@ -184,3 +184,57 @@ func TestCreateEventHandlerRejectsMissingID(t *testing.T) {
 		t.Fatalf("expected queue length 0, got %d", queueStats.Length)
 	}
 }
+
+func TestReplayDeadLetterHandlerRejectsInvalidToken(t *testing.T) {
+	app := newTestApp(t)
+	app.config.DLQReplayToken = "local-dev-replay-token"
+
+	request := httptest.NewRequest(http.MethodPost, "/internal/dead-letters/evt-001/replay", nil)
+	response := httptest.NewRecorder()
+
+	app.routes().ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, response.Code)
+	}
+}
+
+func TestReplayDeadLetterHandlerRequeuesEventWithOriginalRequestID(t *testing.T) {
+	app := newTestApp(t)
+	app.config.DLQReplayToken = "local-dev-replay-token"
+	event := testEvent()
+	event.RequestID = "request-replay-001"
+
+	if err := app.eventStore.SaveQueuedWithOutbox(t.Context(), event); err != nil {
+		t.Fatalf("failed to save event: %v", err)
+	}
+	if _, err := app.eventStore.db.ExecContext(t.Context(), `
+		UPDATE events SET status = $1, attempts = 3, error = $2 WHERE id = $3
+	`, EventStatusFailed, "processing failed", event.ID); err != nil {
+		t.Fatalf("failed to mark event as failed: %v", err)
+	}
+	if err := app.eventStore.SaveDeadLetter(t.Context(), event, errForTest(), 3); err != nil {
+		t.Fatalf("failed to save dead letter: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/internal/dead-letters/evt-001/replay", nil)
+	request.Header.Set("Authorization", "Bearer local-dev-replay-token")
+	response := httptest.NewRecorder()
+
+	app.routes().ServeHTTP(response, request)
+
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d", http.StatusAccepted, response.Code)
+	}
+
+	pending, err := app.eventStore.ListPendingOutbox(t.Context(), 10)
+	if err != nil {
+		t.Fatalf("failed to list pending outbox: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("expected one pending outbox message, got %d", len(pending))
+	}
+	if pending[0].Event.RequestID != event.RequestID {
+		t.Fatalf("expected request ID %q, got %q", event.RequestID, pending[0].Event.RequestID)
+	}
+}
