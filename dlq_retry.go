@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"math/rand"
 	"sync"
 	"time"
 )
@@ -63,8 +64,8 @@ func (scheduler *DLQRetryScheduler) retry(ctx context.Context) {
 			if scheduler.metrics != nil {
 				scheduler.metrics.IncDeadLetterAutoRetryFailed()
 			}
-			slog.Error("automatic dead letter replay failed", "event_id", item.EventID, "error", err)
 			delay := scheduler.retryDelay(item.ReplayAttempt)
+			slog.Error("automatic dead letter replay failed", "event_id", item.EventID, "retry_delay", delay.String(), "error", err)
 			if rescheduleErr := scheduler.store.RescheduleDeadLetterRetryWithDelay(ctx, item.EventID, err, delay); rescheduleErr != nil {
 				slog.Error("reschedule automatic dead letter replay failed", "event_id", item.EventID, "error", rescheduleErr)
 			}
@@ -82,5 +83,9 @@ func (scheduler *DLQRetryScheduler) retryDelay(attempt int) time.Duration {
 			return 24 * time.Hour
 		}
 	}
-	return delay
+	jitterLimit := delay / 4
+	if jitterLimit == 0 {
+		return delay
+	}
+	return delay + time.Duration(rand.Int63n(int64(jitterLimit)+1))
 }
