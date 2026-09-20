@@ -156,6 +156,35 @@ go build .
 
 The CI pipeline creates the test database before running integration tests.
 
+## Load tests with k6
+
+The k6 suite in `tests/load/webhook-load.js` provides `smoke`, `load`, `stress`, `spike`, `soak`, and `custom` profiles. Each run applies latency and reliability thresholds and writes self-contained HTML and machine-readable JSON reports under `reports/k6/`.
+
+Run the one-minute smoke profile. The wrapper uses a local k6 binary when available and otherwise runs the pinned Docker image:
+
+```powershell
+.\scripts\run-k6.ps1 -Profile smoke
+```
+
+Run the sustainable end-to-end profile at 25 requests per second for 15 minutes:
+
+```powershell
+.\scripts\run-k6.ps1 -Profile load
+```
+
+Run a custom profile:
+
+```powershell
+.\scripts\run-k6.ps1 `
+  -Profile custom `
+  -Rate 100 `
+  -Duration 10m `
+  -PreAllocatedVUs 200 `
+  -MaxVUs 800
+```
+
+Use `-Engine Local` or `-Engine Docker` to select an execution engine explicitly. The `stress`, `spike`, and `soak` profiles must be run deliberately because they can create a large RabbitMQ backlog. A successful ingestion report does not prove end-to-end completion: after the test, verify that accepted and processed counters converge and that RabbitMQ, Outbox, and the dead-letter queue are drained.
+
 ## Reset the Docker environment
 
 The following commands remove PostgreSQL and RabbitMQ data:
