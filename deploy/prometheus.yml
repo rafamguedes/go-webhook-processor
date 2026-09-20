@@ -13,6 +13,8 @@ alerting:
 scrape_configs:
   - job_name: webhook-processor
     metrics_path: /metrics/prometheus
-    static_configs:
-      - targets:
-          - webhook-processor:8080
+    dns_sd_configs:
+      - names:
+          - webhook-processor
+        type: A
+        port: 8080

@@ -49,7 +49,7 @@ type EventStore struct {
 	db *sql.DB
 }
 
-func OpenEventStore(databaseURL string) (*EventStore, error) {
+func openEventStore(databaseURL string, maxOpenConns int, maxIdleConns int, maxLifetime time.Duration, maxIdleTime time.Duration) (*EventStore, error) {
 	db, err := sql.Open("pgx", databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("open event store: %w", err)
@@ -59,6 +59,10 @@ func OpenEventStore(databaseURL string) (*EventStore, error) {
 		db.Close()
 		return nil, fmt.Errorf("ping event store: %w", err)
 	}
+	db.SetMaxOpenConns(maxOpenConns)
+	db.SetMaxIdleConns(maxIdleConns)
+	db.SetConnMaxLifetime(maxLifetime)
+	db.SetConnMaxIdleTime(maxIdleTime)
 
 	return &EventStore{db: db}, nil
 }
